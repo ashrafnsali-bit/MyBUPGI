@@ -89,7 +89,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -126,6 +126,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxDistance: 100000
+  damage: 10
+  isEnemyBullet: 0
+  owner: {fileID: 0}
   decalHitWall: {fileID: 179232, guid: b2ac1383a96f94a50b7ed458be173bbd, type: 3}
   floatInfrontOfWall: 0.1
   bloodEffect: {fileID: 1013274939826982, guid: ffbf169ab9dcfdc45ae14010bc82a6b2, type: 3}

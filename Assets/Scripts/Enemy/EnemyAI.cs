@@ -262,8 +262,9 @@ public class EnemyAI : MonoBehaviour
                 if (bs != null) {
                     bs.damage = damage;
                     bs.isEnemyBullet = true; 
-                    bs.ignoreLayer = 0; 
                     bs.owner = gameObject; // Assign Owner
+                    // Removed: bs.ignoreLayer = 0; -> Let the prefab handle layers, 
+                    // or it will be set by the Inspector.
                 }
             }
             else

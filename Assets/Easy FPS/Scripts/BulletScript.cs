@@ -20,46 +20,42 @@ public class BulletScript : MonoBehaviour {
 	private bool hasDealtDamage = false; // CRITICAL FIX: Prevent multi-hit per bullet
 
 	void Update () {
-		// CRITICAL: If this bullet already dealt damage, don't check again
 		if (hasDealtDamage) return;
 		
-		// FIXED: Use SphereCast for thicker bullet detection
-		// This helps hit the player even if the aim is slightly off or the bullet is small
-		// Use a reasonable distance (5.0f) to ensure we don't skip over targets at high speeds
-		float radius = 0.5f; 
-		RaycastHit[] hits = Physics.SphereCastAll(transform.position, radius, transform.forward, 5.0f, ~ignoreLayer, QueryTriggerInteraction.Ignore);
+		// Use a precise radius for environment and a thicker one for targets
+		float precisionRadius = 0.1f; 
+		float hitRange = 2.0f; // Check slightly ahead
 		
-		// Sort by distance so we hit the closest thing
+		RaycastHit[] hits = Physics.SphereCastAll(transform.position, precisionRadius, transform.forward, hitRange, ~ignoreLayer, QueryTriggerInteraction.Ignore);
 		System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance));
 
 		foreach (RaycastHit hit in hits)
 		{
-			if (hit.transform.gameObject == owner) continue; // Ignore shooter
-			if (hit.distance < 0.1f && hit.transform.root == transform.root) continue; // Ignore self/gun parts (Reduced distance check)
+			// 1. Ignore shooter and close-range self-hits
+			if (hit.transform.gameObject == owner) continue;
+			if (hit.distance < 0.1f && hit.transform.root == transform.root) continue;
 
-			// Special Check: Did we hit a Player?
+			// 2. Check for Targets (Player or Enemy)
 			PlayerHealth player = hit.transform.GetComponent<PlayerHealth>();
 			if (player == null) player = hit.transform.GetComponentInParent<PlayerHealth>();
 
-			// If we hit SOMETHING, and it's not the owner...
-			
-			// 1. Check for Player
 			if (player != null) {
-				hasDealtDamage = true; // Mark as dealt
-				Debug.Log("Bullet Hit PLAYER! Applying damage: " + damage);
+				hasDealtDamage = true;
+				Debug.Log(gameObject.name + " HIT PLAYER: " + player.name);
 				player.TakeDamage(damage);
 				if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
 				Destroy(gameObject);
 				return;
 			}
 			
-			// 2. Check for Enemy (Friendly Fire / Player bullets)
+			// Enemies only take damage from Player bullets (Friendly Fire OFF)
 			if (!isEnemyBullet) {
 				EnemyAI enemy = hit.transform.GetComponent<EnemyAI>();
 				if (enemy == null) enemy = hit.transform.GetComponentInParent<EnemyAI>();
 				
 				if (enemy != null) {
-					hasDealtDamage = true; // Mark as dealt
+					hasDealtDamage = true;
+					Debug.Log(gameObject.name + " HIT ENEMY: " + enemy.name);
 					enemy.TakeDamage(damage);
 					if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
 					Destroy(gameObject);
@@ -67,17 +63,25 @@ public class BulletScript : MonoBehaviour {
 				}
 			}
 
-			// 3. Walls / Environment
-			if(decalHitWall && hit.transform.tag == "LevelPart"){
-				Instantiate(decalHitWall, hit.point + hit.normal * floatInfrontOfWall, Quaternion.LookRotation(hit.normal));
-				Destroy(gameObject);
-				return;
-			}
-			
-			// If we hit something solid that isn't a trigger, stop.
+			// 3. Check for Solid Objects (Fences, Walls, etc.)
+			// We stop if it's not a trigger and not the owner
 			if (!hit.collider.isTrigger)
 			{
-				Debug.Log("Bullet hit solid object: " + hit.transform.name);
+				// Try to show decal if tag exists, otherwise skip without crashing
+				if (decalHitWall) {
+					bool isLevelPart = false;
+					try {
+						isLevelPart = hit.transform.CompareTag("LevelPart");
+					} catch {
+						// Tag LevelPart doesn't exist in Project Settings
+					}
+					
+					if (isLevelPart) {
+						Instantiate(decalHitWall, hit.point + hit.normal * floatInfrontOfWall, Quaternion.LookRotation(hit.normal));
+					}
+				}
+				
+				Debug.Log(gameObject.name + " hit solid: " + hit.transform.name + " at distance " + hit.distance);
 				Destroy(gameObject);
 				return;
 			}

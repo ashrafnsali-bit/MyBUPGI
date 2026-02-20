@@ -7,6 +7,7 @@ TagManager:
   - Weapon
   - Dummie
   - Enemy
+  - LevelPart
   layers:
   - Default
   - TransparentFX

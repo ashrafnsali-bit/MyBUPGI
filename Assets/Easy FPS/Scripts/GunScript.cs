@@ -335,6 +335,10 @@ public class GunScript : MonoBehaviour {
 	[HideInInspector] public GameObject bulletSpawnPlace;
 	[Tooltip("Bullet prefab that this waepon will shoot.")]
 	public GameObject bullet;
+	[Tooltip("Speed of the bullet.")]
+	public float bulletSpeed = 100.0f;
+	[Tooltip("Damage this weapon deals.")]
+	public float damage = 20.0f;
 	[Tooltip("Rounds per second if weapon is set to automatic rafal.")]
 	public float roundsPerSecond;
 	private float waitTillNextFire;
@@ -429,8 +433,18 @@ public class GunScript : MonoBehaviour {
 			if(bulletsInTheGun > 0){
 
 				int randomNumberForMuzzelFlash = Random.Range(0,5);
-				if (bullet)
-					Instantiate (bullet, bulletSpawnPlace.transform.position, bulletSpawnPlace.transform.rotation);
+				if (bullet) {
+					GameObject bulletInstance = Instantiate (bullet, bulletSpawnPlace.transform.position, bulletSpawnPlace.transform.rotation);
+					Rigidbody rb = bulletInstance.GetComponent<Rigidbody>();
+					if (rb != null) rb.linearVelocity = bulletSpawnPlace.transform.forward * bulletSpeed;
+					
+					BulletScript bs = bulletInstance.GetComponent<BulletScript>();
+					if (bs != null) {
+						bs.damage = damage;
+						bs.owner = gameObject;
+						bs.isEnemyBullet = false;
+					}
+				}
 				else
 					print ("Missing the bullet prefab");
 				holdFlash = Instantiate(muzzelFlash[randomNumberForMuzzelFlash], muzzelSpawn.transform.position /*- muzzelPosition*/, muzzelSpawn.transform.rotation * Quaternion.Euler(0,0,90) ) as GameObject;

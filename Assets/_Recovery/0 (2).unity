@@ -2602,6 +2602,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerHealth
   maxHealth: 100
   currentHealth: 0
+  damageCooldown: 0.2
   hitSound: {fileID: 0}
   deathSound: {fileID: 0}
 --- !u!1001 &265196778
