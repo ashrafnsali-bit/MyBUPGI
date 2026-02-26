@@ -178,13 +178,11 @@ public class GunInventory : MonoBehaviour {
 	 * From here I am listing thourhg guns I have and drawing corresponding images on the sceen.
 	 */
 	void OnGUI(){
-
-		if(currentGun){
+		if(currentGun && icons != null && icons.Length == gunsIHave.Count){
 			for(int i = 0; i < gunsIHave.Count; i++){
 				DrawCorrespondingImage(i);
 			}
 		}
-
 	}
 
 	[Header("GUI Gun preview variables")]
@@ -202,8 +200,9 @@ public class GunInventory : MonoBehaviour {
 	 * The curent gun selected image has their image slightly enlared for some value.
 	 */
 	void DrawCorrespondingImage(int _number){
+		if (_number >= icons.Length || icons[_number] == null) return;
 
-		string deleteCloneFromName = currentGun.name.Substring(0,currentGun.name.Length - 7);
+		string deleteCloneFromName = currentGun.name.Replace("(Clone)", "");
 
 		if(menuStyle == MenuStyle.horizontal){
 			if(deleteCloneFromName == gunsIHave[_number]){
