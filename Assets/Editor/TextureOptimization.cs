@@ -5,7 +5,7 @@ using System.IO;
 
 public class TextureOptimization : EditorWindow
 {
-    [MenuItem("Tools/Optimize All Textures")]
+    [MenuItem("Tools/Screaming Fix/5. Extreme Texture Optimization")]
     public static void OptimizeAllTextures()
     {
         string[] guids = AssetDatabase.FindAssets("t:Texture");
@@ -20,10 +20,10 @@ public class TextureOptimization : EditorWindow
             {
                 bool changed = false;
                 
-                // Cap max texture size at 1024
-                if (importer.maxTextureSize > 1024)
+                // Aggressive cap Max texture size at 512 for low-memory systems
+                if (importer.maxTextureSize > 512)
                 {
-                    importer.maxTextureSize = 1024;
+                    importer.maxTextureSize = 512;
                     changed = true;
                 }
                 
@@ -41,13 +41,30 @@ public class TextureOptimization : EditorWindow
                 }
             }
             
-            if (count % 10 == 0)
+            if (count % 20 == 0)
             {
-                EditorUtility.DisplayProgressBar("Optimizing Textures", path, (float)count / guids.Length);
+                EditorUtility.DisplayProgressBar("Extreme Optimization", path, (float)count / guids.Length);
             }
         }
         
         EditorUtility.ClearProgressBar();
-        Debug.Log($"Successfully optimized {count} textures.");
+        Debug.Log($"Successfully optimized {count} textures to 512px.");
+        EditorUtility.DisplayDialog("Optimization Complete", $"Capped {count} textures at 512px.\n\nMemory usage during build will be much lower now.", "Thanks!");
+    }
+
+    [MenuItem("Tools/Screaming Fix/6. Clean Shader Cache")]
+    public static void CleanShaderCache()
+    {
+        string cachePath = Path.Combine(Directory.GetCurrentDirectory(), "Library", "ShaderCache");
+        if (Directory.Exists(cachePath))
+        {
+            Directory.Delete(cachePath, true);
+            Debug.Log("Deleted Shader Cache. Unity will recreate it next time it needs it.");
+            EditorUtility.DisplayDialog("Cache Cleaned", "Shader cache deleted to free up memory.", "OK");
+        }
+        else
+        {
+            Debug.Log("Shader Cache folder not found. Nothing to delete.");
+        }
     }
 }

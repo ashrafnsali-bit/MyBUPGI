@@ -28,19 +28,19 @@ public class FixPlayerCamera : EditorWindow
     [MenuItem("Tools/Screaming Fix/2. Convert Materials")]
     public static void ManualConvertMaterials() { ConvertMaterials(); AssetDatabase.SaveAssets(); }
 
-    [MenuItem("Tools/Screaming Fix/3. Final Camera Fix")]
+    [MenuItem("Tools/Screaming Fix/3. Scene Cleanup & Lighting")]
+    public static void ManualCleanup() { FixSceneLighting(); CleanupHDRP(); AssetDatabase.SaveAssets(); }
+
+    [MenuItem("Tools/Screaming Fix/4. FULL RECOVERY")]
     public static void FixAll()
     {
-        Debug.Log("Starting Final Camera Fix...");
-
-        // 0. Ensure URP is active and materials are converted
+        Debug.Log("Starting Full Recovery Fix...");
         FixGraphicsSettings();
         ConvertMaterials();
-
+        
         // 1. Fix Prefab
         string prefabPath = "Assets/Easy FPS/Prefabs/Player.prefab";
         GameObject playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-        
         if (playerPrefab != null)
         {
             string instancePath = AssetDatabase.GetAssetPath(playerPrefab);
@@ -48,50 +48,40 @@ public class FixPlayerCamera : EditorWindow
             FixCamerasInObject(root);
             PrefabUtility.SaveAsPrefabAsset(root, instancePath);
             PrefabUtility.UnloadPrefabContents(root);
-            Debug.Log("Fixed Player Prefab.");
         }
 
         // 2. Fix Scene
-        GameObject scenePlayer = GameObject.FindGameObjectWithTag("Player");
-        if (scenePlayer != null)
+        FixSceneLighting();
+        CleanupHDRP();
+        
+        // Search for player in scene
+        GameObject playerInstance = GameObject.FindGameObjectWithTag("Player");
+        if (playerInstance != null)
         {
-            FixCamerasInObject(scenePlayer);
-            Debug.Log("Fixed Player in Scene.");
+            FixCamerasInObject(playerInstance);
         }
 
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-        
-        EditorUtility.DisplayDialog("Camera Fix", "Player cameras configured. Materials checked.\n\nCheck the Simulator now!", "OK");
+        Debug.Log("Full Recovery Fix Complete!");
+        EditorUtility.DisplayDialog("Fix Complete", "All systems optimized for URP.\n\nPlease 'Build and Run' now!", "Let's Go");
     }
 
     private static void FixGraphicsSettings()
     {
-        UniversalRenderPipelineAsset urpAsset = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>("Assets/Settings/URP-Main-Asset.asset");
+        string assetPath = "Assets/Settings/URP-Main-Asset.asset";
+        UniversalRenderPipelineAsset urpAsset = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(assetPath);
         if (urpAsset != null)
         {
             GraphicsSettings.defaultRenderPipeline = urpAsset;
-            
-            string[] names = QualitySettings.names;
-            for (int i = 0; i < names.Length; i++)
-            {
-                QualitySettings.SetQualityLevel(i);
-                QualitySettings.renderPipeline = urpAsset;
-            }
-            Debug.Log("Assigned URP Asset to all Quality Levels.");
+            QualitySettings.renderPipeline = urpAsset;
+            Debug.Log("URP Asset assigned to Graphics & Quality Settings.");
         }
     }
 
-    private static void ConvertMaterials()
+    public static void ConvertMaterials()
     {
-        Debug.Log("Checking materials for URP compatibility...");
         string[] guids = AssetDatabase.FindAssets("t:Material", new[] { "Assets" });
         Shader urpLit = Shader.Find("Universal Render Pipeline/Lit");
-        if (urpLit == null)
-        {
-            Debug.LogError("Could not find URP Lit shader!");
-            return;
-        }
+        if (urpLit == null) return;
 
         int count = 0;
         foreach (var guid in guids)
@@ -100,24 +90,56 @@ public class FixPlayerCamera : EditorWindow
             Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null) continue;
 
-            string shaderName = mat.shader != null ? mat.shader.name : "null";
-            
-            // Convert if shader is null, Standard, or has internal errors
+            string sName = mat.shader != null ? mat.shader.name : "null";
             bool needsFix = mat.shader == null || 
-                            shaderName == "Standard" || 
-                            shaderName.Contains("InternalError") || 
-                            shaderName.Contains("Hidden/InternalErrorShader") ||
-                            shaderName == "Autodesk Interactive"; // Often used in imported assets
+                            sName == "Standard" || 
+                            sName.Contains("InternalError") || 
+                            sName.Contains("HDRP/") ||
+                            sName.Contains("Autodesk") ||
+                            sName.Contains("Legacy Shaders/");
 
             if (needsFix)
             {
-                Debug.Log($"Converting material to URP Lit: {mat.name} (was {shaderName})");
                 mat.shader = urpLit;
                 EditorUtility.SetDirty(mat);
                 count++;
             }
         }
-        Debug.Log($"Material check complete. Converted {count} materials.");
+        Debug.Log($"Converted {count} materials to URP Lit.");
+    }
+
+    private static void FixSceneLighting()
+    {
+        // 1. Boost Directional Light
+        Light[] allLights = GameObject.FindObjectsByType<Light>(FindObjectsSortMode.None);
+        foreach (var l in allLights)
+        {
+            if (l.type == LightType.Directional)
+            {
+                l.intensity = Mathf.Max(l.intensity, 1.5f);
+                l.color = Color.white;
+            }
+        }
+
+        // 2. Fix Ambient & Skybox
+        RenderSettings.skybox = AssetDatabase.GetBuiltinExtraResource<Material>("Default-Skybox.mat");
+        RenderSettings.ambientMode = AmbientMode.Skybox;
+        RenderSettings.ambientIntensity = 1.0f;
+    }
+
+    private static void CleanupHDRP()
+    {
+        // Delete objects that start with "HD" or have "Volume" or "HDRP" in name, but aren't Player
+        GameObject[] allObs = GameObject.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+        foreach (var go in allObs)
+        {
+            string n = go.name.ToLower();
+            if ((n.Contains("hdrp") || n.Contains("volume") || n.Contains("fog")) && !go.transform.root.CompareTag("Player"))
+            {
+                Debug.Log($"Removing HDRP leftover: {go.name}");
+                GameObject.DestroyImmediate(go);
+            }
+        }
     }
 
     private static void FixCamerasInObject(GameObject root)
@@ -129,10 +151,10 @@ public class FixPlayerCamera : EditorWindow
         foreach (var cam in cams)
         {
             var data = cam.GetComponent<UniversalAdditionalCameraData>();
-            if (data == null)
-            {
-                data = cam.gameObject.AddComponent<UniversalAdditionalCameraData>();
-            }
+            if (data == null) data = cam.gameObject.AddComponent<UniversalAdditionalCameraData>();
+            
+            cam.cullingMask = -1; // Everything
+            cam.farClipPlane = Mathf.Max(cam.farClipPlane, 2000f);
 
             if (cam.gameObject.name.ToLower().Contains("main"))
                 mainCam = cam;
@@ -143,60 +165,29 @@ public class FixPlayerCamera : EditorWindow
         if (mainCam != null)
         {
             var mainData = mainCam.GetComponent<UniversalAdditionalCameraData>();
-            SerializedObject soMain = new SerializedObject(mainData);
-            soMain.FindProperty("m_CameraType").intValue = (int)CameraRenderType.Base;
-            soMain.FindProperty("m_RendererIndex").intValue = 0;
-            
+            mainData.renderType = CameraRenderType.Base;
             mainCam.enabled = true;
             mainCam.gameObject.SetActive(true);
-            mainCam.cullingMask |= (1 << 0);
-            
-            // Disable other base cameras in scene
+
+            // Disable redundant scene cameras
             Camera[] allCams = GameObject.FindObjectsByType<Camera>(FindObjectsSortMode.None);
-            foreach(var c in allCams) {
-                if (c == mainCam || c == secondCam) continue;
-                if (c.transform.IsChildOf(mainCam.transform.root)) continue;
+            foreach (var c in allCams)
+            {
+                if (c == mainCam || c == secondCam || c.transform.IsChildOf(mainCam.transform)) continue;
+                if (c.transform.root.CompareTag("Player")) continue;
                 
-                var d = c.GetComponent<UniversalAdditionalCameraData>();
-                if (d != null && d.renderType == CameraRenderType.Base) {
-                    c.enabled = false;
-                }
+                c.gameObject.SetActive(false);
             }
 
             if (secondCam != null)
             {
                 var secondData = secondCam.GetComponent<UniversalAdditionalCameraData>();
-                SerializedObject soSecond = new SerializedObject(secondData);
-                soSecond.FindProperty("m_CameraType").intValue = (int)CameraRenderType.Overlay;
-                soSecond.FindProperty("m_RendererIndex").intValue = 0;
-                soSecond.ApplyModifiedProperties();
-                
+                secondData.renderType = CameraRenderType.Overlay;
                 secondCam.enabled = true;
                 secondCam.gameObject.SetActive(true);
-                
-                SerializedProperty stack = soMain.FindProperty("m_Cameras");
-                bool exists = false;
-                for (int i = 0; i < stack.arraySize; i++)
-                {
-                    if (stack.GetArrayElementAtIndex(i).objectReferenceValue == secondCam)
-                    {
-                        exists = true;
-                        break;
-                    }
-                }
-                
-                if (!exists)
-                {
-                    stack.InsertArrayElementAtIndex(stack.arraySize);
-                    stack.GetArrayElementAtIndex(stack.arraySize - 1).objectReferenceValue = secondCam;
-                }
-            }
-            soMain.ApplyModifiedProperties();
-            EditorUtility.SetDirty(mainCam.gameObject);
-            if (PrefabUtility.IsPartOfAnyPrefab(mainCam.gameObject))
-            {
-                PrefabUtility.RecordPrefabInstancePropertyModifications(mainData);
-                PrefabUtility.RecordPrefabInstancePropertyModifications(mainCam);
+
+                if (!mainData.cameraStack.Contains(secondCam))
+                    mainData.cameraStack.Add(secondCam);
             }
         }
     }
