@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 [RequireComponent(typeof(Rigidbody))]
@@ -50,25 +50,49 @@ public class PlayerMovementScript : MonoBehaviour {
 			rb.linearVelocity.y,
 			horizontalMovement.y
 		);
-		if (grounded){
-			rb.linearVelocity = Vector3.SmoothDamp(rb.linearVelocity,
-				new Vector3(0,rb.linearVelocity.y,0),
-				ref slowdownV,
-				deaccelerationSpeed);
+		bool isMoving = Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0;
+
+		#if UNITY_ANDROID || UNITY_IOS
+		float h = MobileJoystick.InputVector.x;
+		float v = MobileJoystick.InputVector.y;
+		
+		// TOUCH TO MOVE FORWARD: If not using joystick, check for any touch on screen
+		if (Mathf.Abs(v) < 0.1f && Input.GetMouseButton(0)) {
+			// Ensure touch is NOT over UI (joystick, buttons, etc.)
+			if (UnityEngine.EventSystems.EventSystem.current == null || !UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) {
+				v = 1.0f; // Move forward
+			}
 		}
 
-		bool isMoving = Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0;
+		isMoving = Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f;
+		
+		// Optional: Debug logs for mobile movement
+		if (isMoving) {
+			// Debug.Log($"Mobile Move: h={h}, v={v}");
+		}
+		#else
+		float h = Input.GetAxis ("Horizontal");
+		float v = Input.GetAxis ("Vertical");
+		#endif
+
 		bool actuallyGrounded = grounded || RayCastGrounded();
 
 		if (actuallyGrounded) {
-			rb.AddRelativeForce (Input.GetAxis ("Horizontal") * accelerationSpeed * Time.deltaTime, 0, Input.GetAxis ("Vertical") * accelerationSpeed * Time.deltaTime);
+			if (!isMoving) {
+				rb.linearVelocity = Vector3.SmoothDamp(rb.linearVelocity,
+					new Vector3(0,rb.linearVelocity.y,0),
+					ref slowdownV,
+					deaccelerationSpeed);
+			}
+			rb.AddRelativeForce (h * accelerationSpeed * Time.deltaTime, 0, v * accelerationSpeed * Time.deltaTime);
 		} else {
-			rb.AddRelativeForce (Input.GetAxis ("Horizontal") * accelerationSpeed / 2 * Time.deltaTime, 0, Input.GetAxis ("Vertical") * accelerationSpeed / 2 * Time.deltaTime);
+			rb.AddRelativeForce (h * accelerationSpeed / 2 * Time.deltaTime, 0, v * accelerationSpeed / 2 * Time.deltaTime);
 		}
+
 		/*
 		 * Slippery issues fixed here
 		 */
-		if (Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0) {
+		if (isMoving) {
 			deaccelerationSpeed = 0.5f;
 		} else {
 			deaccelerationSpeed = 0.1f;

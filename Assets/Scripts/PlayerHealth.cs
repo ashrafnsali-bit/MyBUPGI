@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class PlayerHealth : MonoBehaviour
 {
-    public float maxHealth = 10000; // Drastically increased
+    public float maxHealth = 100; // Normalized to 100
     public float currentHealth;
     public float damageCooldown = 0.2f; // Prevents being hit too many times at once
     private float lastDamageTime;

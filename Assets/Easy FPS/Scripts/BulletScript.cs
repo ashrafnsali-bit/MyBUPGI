@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 
 public class BulletScript : MonoBehaviour {
@@ -17,77 +17,138 @@ public class BulletScript : MonoBehaviour {
 	public GameObject bloodEffect;
 	[Tooltip("Put Weapon layer and Player layer to ignore bullet raycast.")]
 	public LayerMask ignoreLayer;
-	private bool hasDealtDamage = false; // CRITICAL FIX: Prevent multi-hit per bullet
+	// DIAGNOSTIC: Debug mode to show what bullets are hitting
+	public bool debugBullets = true;
+	private bool hasDealtDamage = false; 
+
+
+	void Start() {
+		// DIAGNOSTIC: Verify ignore layer
+		if (debugBullets) Debug.Log(gameObject.name + " spawned. IgnoreLayer Mask: " + ignoreLayer.value);
+		Destroy(gameObject, 5.0f);
+	}
 
 	void Update () {
 		if (hasDealtDamage) return;
 		
 		// Use a precise radius for environment and a thicker one for targets
 		float precisionRadius = 0.1f; 
-		float hitRange = 2.0f; // Check slightly ahead
+		float hitRange = 5.0f; // INCREASED: Check further ahead to avoid skipping targets
 		
-		RaycastHit[] hits = Physics.SphereCastAll(transform.position, precisionRadius, transform.forward, hitRange, ~ignoreLayer, QueryTriggerInteraction.Ignore);
-		System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance));
+		// HIT DETECTION: We check everything EXCEPT the ignoreLayer, 
+		// BUT we must ENSURE the Player and Enemy layers are NOT ignored if they are targets.
+		LayerMask detectionMask = ~ignoreLayer;
+		
+		// Force include Player and Enemy layers ONLY if they exist
+		int playerLayer = LayerMask.NameToLayer("Player");
+		int enemyLayer = LayerMask.NameToLayer("Enemy");
+		if (playerLayer != -1) detectionMask |= (1 << playerLayer);
+		if (enemyLayer != -1) detectionMask |= (1 << enemyLayer);
 
-		foreach (RaycastHit hit in hits)
+		// Also ensure Default and Ignore Raycast are NOT the ONLY things we have
+		if (detectionMask.value == 0) {
+			detectionMask = LayerMask.GetMask("Default", "Enemy", "Player");
+			if (debugBullets) Debug.LogWarning("Bullet detectionMask was 0! Resetting to Default/Enemy/Player.");
+		}
+
+		RaycastHit[] hits = Physics.SphereCastAll(transform.position, precisionRadius, transform.forward, hitRange, detectionMask, QueryTriggerInteraction.Collide);
+		
+		if (hits.Length > 0)
 		{
-			// 1. Ignore shooter and close-range self-hits
-			if (hit.transform.gameObject == owner) continue;
-			if (hit.distance < 0.1f && hit.transform.root == transform.root) continue;
+			System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance));
 
-			// 2. Check for Targets (Player or Enemy)
-			PlayerHealth player = hit.transform.GetComponent<PlayerHealth>();
-			if (player == null) player = hit.transform.GetComponentInParent<PlayerHealth>();
-
-			if (player != null) {
-				hasDealtDamage = true;
-				Debug.Log(gameObject.name + " HIT PLAYER: " + player.name);
-				player.TakeDamage(damage);
-				if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
-				Destroy(gameObject);
-				return;
-			}
-			
-			// Enemies only take damage from Player bullets (Friendly Fire OFF)
-			if (!isEnemyBullet) {
-				EnemyAI enemy = hit.transform.GetComponent<EnemyAI>();
-				if (enemy == null) enemy = hit.transform.GetComponentInParent<EnemyAI>();
+			foreach (RaycastHit hit in hits)
+			{
+				// 1. Ignore shooter and close-range self-hits
+				if (owner != null) {
+					if (hit.transform.IsChildOf(owner.transform)) continue;
+				}
 				
-				if (enemy != null) {
+				// Prevent hitting the bullet itself
+				if (hit.transform == transform) continue;
+
+				if (debugBullets) Debug.Log(gameObject.name + " detected hit on: " + hit.transform.name + " (Layer: " + LayerMask.LayerToName(hit.transform.gameObject.layer) + ")");
+
+				// 2. Check for Targets (Player or Enemy)
+				// Use GetComponentInParent to handle hits on child colliders (limbs, etc.)
+				PlayerHealth player = hit.transform.GetComponentInParent<PlayerHealth>();
+				EnemyAI enemy = hit.transform.GetComponentInParent<EnemyAI>();
+
+				// TEAM FILTERING:
+				// If this is an Enemy Bullet, it can only hit the Player.
+				// If this is a Player Bullet, it can only hit Enemies.
+				if (isEnemyBullet) {
+					// Enemy bullets skip hitting other enemies
+					if (enemy != null) {
+						if (debugBullets) Debug.Log(gameObject.name + " (Enemy Bullet) ignoring ally: " + enemy.name);
+						continue; // Skip damage and keep bullet flying
+					}
+					
+					if (player != null) {
+						hasDealtDamage = true;
+						if (debugBullets) Debug.Log(gameObject.name + " (Enemy Bullet) HIT PLAYER: " + player.name);
+						player.TakeDamage(damage);
+						if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+						Destroy(gameObject);
+						return;
+					}
+				} else {
+					// Player bullets skip hitting the player
+					if (player != null) {
+						// Usually handled by Owner check (IsChildOf), but this is an extra layer of safety.
+						if (debugBullets) Debug.Log(gameObject.name + " (Player Bullet) ignoring self/player: " + player.name);
+						continue; 
+					}
+
+					if (enemy != null) {
+						hasDealtDamage = true;
+						if (debugBullets) Debug.Log(gameObject.name + " (Player Bullet) HIT ENEMY: " + enemy.name);
+						enemy.TakeDamage(damage);
+						if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+						Destroy(gameObject);
+						return;
+					}
+				} 
+				
+				// FALLBACK: If tagged Enemy but no EnemyAI, try to find ANY TakeDamage method or just log loudly
+				if (hit.transform.CompareTag("Enemy") || hit.transform.CompareTag("Dummie")) {
+					Debug.LogWarning("Bullet hit an object tagged '" + hit.transform.tag + "' (" + hit.transform.name + ") but it has no EnemyAI component! Checking for other damageable components...");
+					// Some objects might have health scripts named differently
+					hit.transform.SendMessage("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
+					
+					// If we sent message, we consider it a hit
 					hasDealtDamage = true;
-					Debug.Log(gameObject.name + " HIT ENEMY: " + enemy.name);
-					enemy.TakeDamage(damage);
 					if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
 					Destroy(gameObject);
 					return;
 				}
-			}
 
-			// 3. Check for Solid Objects (Fences, Walls, etc.)
-			// We stop if it's not a trigger and not the owner
-			if (!hit.collider.isTrigger)
-			{
-				// Try to show decal if tag exists, otherwise skip without crashing
-				if (decalHitWall) {
-					bool isLevelPart = false;
-					try {
-						isLevelPart = hit.transform.CompareTag("LevelPart");
-					} catch {
-						// Tag LevelPart doesn't exist in Project Settings
+				// 3. Check for Solid Objects (Fences, Walls, etc.)
+				// We stop if it's not a trigger
+				if (!hit.collider.isTrigger)
+				{
+					// Try to show decal if tag exists, otherwise skip without crashing
+					if (decalHitWall) {
+						bool isLevelPart = false;
+						try {
+							isLevelPart = hit.transform.CompareTag("LevelPart");
+						} catch { }
+						
+						if (isLevelPart) {
+							Instantiate(decalHitWall, hit.point + hit.normal * floatInfrontOfWall, Quaternion.LookRotation(hit.normal));
+						}
 					}
 					
-					if (isLevelPart) {
-						Instantiate(decalHitWall, hit.point + hit.normal * floatInfrontOfWall, Quaternion.LookRotation(hit.normal));
-					}
+					if (debugBullets) Debug.Log(gameObject.name + " hit solid environment: " + hit.transform.name + " at distance " + hit.distance);
+					Destroy(gameObject);
+					return;
 				}
-				
-				Debug.Log(gameObject.name + " hit solid: " + hit.transform.name + " at distance " + hit.distance);
-				Destroy(gameObject);
-				return;
+				else if (debugBullets) 
+				{
+					Debug.Log(gameObject.name + " passed through trigger: " + hit.transform.name);
+				}
 			}
 		}
-		
-		Destroy(gameObject, 0.1f);
 	}
 }
 

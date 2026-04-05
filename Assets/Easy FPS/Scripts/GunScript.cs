@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 //using UnityStandardAssets.ImageEffects;
 
@@ -13,9 +13,9 @@ public class GunScript : MonoBehaviour {
 
 	[Header("Player movement properties")]
 	[Tooltip("Speed is determined via gun because not every gun has same properties or weights so you MUST set up your speeds here")]
-	public int walkingSpeed = 3;
+	public int walkingSpeed = 2;
 	[Tooltip("Speed is determined via gun because not every gun has same properties or weights so you MUST set up your speeds here")]
-	public int runningSpeed = 5;
+	public int runningSpeed = 4;
 
 
 	[Header("Bullet properties")]
@@ -441,8 +441,15 @@ public class GunScript : MonoBehaviour {
 					BulletScript bs = bulletInstance.GetComponent<BulletScript>();
 					if (bs != null) {
 						bs.damage = damage;
-						bs.owner = gameObject;
+						bs.owner = player.gameObject;
 						bs.isEnemyBullet = false;
+					}
+
+					// PHYSICS FIX: Ignore collision between player and their own bullet to prevent random pushing
+					Collider playerCollider = player.GetComponent<Collider>();
+					Collider bulletCollider = bulletInstance.GetComponent<Collider>();
+					if (playerCollider != null && bulletCollider != null) {
+						Physics.IgnoreCollision(playerCollider, bulletCollider);
 					}
 				}
 				else

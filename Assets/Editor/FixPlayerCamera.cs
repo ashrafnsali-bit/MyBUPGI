@@ -51,8 +51,8 @@ public class FixPlayerCamera : EditorWindow
         }
 
         // 2. Fix Scene
-        FixSceneLighting();
-        CleanupHDRP();
+        // FixSceneLighting();
+        // CleanupHDRP(); // REMOVED: Too destructive
         
         // Search for player in scene
         GameObject playerInstance = GameObject.FindGameObjectWithTag("Player");
@@ -127,19 +127,9 @@ public class FixPlayerCamera : EditorWindow
         RenderSettings.ambientIntensity = 1.0f;
     }
 
+    // EMPTY METHOD: Prevents compilation errors without deleting map objects
     private static void CleanupHDRP()
     {
-        // Delete objects that start with "HD" or have "Volume" or "HDRP" in name, but aren't Player
-        GameObject[] allObs = GameObject.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
-        foreach (var go in allObs)
-        {
-            string n = go.name.ToLower();
-            if ((n.Contains("hdrp") || n.Contains("volume") || n.Contains("fog")) && !go.transform.root.CompareTag("Player"))
-            {
-                Debug.Log($"Removing HDRP leftover: {go.name}");
-                GameObject.DestroyImmediate(go);
-            }
-        }
     }
 
     private static void FixCamerasInObject(GameObject root)

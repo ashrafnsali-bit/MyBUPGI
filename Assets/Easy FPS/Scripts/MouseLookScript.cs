@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 
 
@@ -112,14 +112,41 @@ public float bottomAngleView = -45;
  */
 void MouseInputMovement(){
 
-	wantedYRotation += Input.GetAxis("Mouse X") * mouseSensitvity;
+	float mouseX = Input.GetAxis("Mouse X");
+	float mouseY = Input.GetAxis("Mouse Y");
+
+	#if UNITY_ANDROID || UNITY_IOS
+	if (Input.touchCount > 0)
+	{
+		foreach (Touch touch in Input.touches)
+		{
+			// Check if touch is on the right side of the screen (not on the joystick)
+			if (touch.position.x > Screen.width * 0.4f)
+			{
+				if (touch.phase == TouchPhase.Moved)
+				{
+					// Adjust sensitivity for touch. DeltaPosition is in pixels, so we scale it down.
+					mouseX = touch.deltaPosition.x * 0.1f; 
+					mouseY = touch.deltaPosition.y * 0.1f;
+				}
+			}
+		}
+	}
+	#endif
+
+	wantedYRotation += mouseX * mouseSensitvity;
 
 	// ROTATION LOCK: Disable vertical rotation on mobile/joystick to prevent flipping
 	if (!IsMobile())
 	{
-		if (!IsMobile()) wantedCameraXRotation -= Input.GetAxis("Mouse Y") * mouseSensitvity;
-		wantedCameraXRotation = Mathf.Clamp(wantedCameraXRotation, bottomAngleView, topAngleView);
+		wantedCameraXRotation -= mouseY * mouseSensitvity;
 	}
+	else
+	{
+		wantedCameraXRotation -= mouseY * mouseSensitvity * 0.5f; // Slower vertical look on mobile
+	}
+	
+	wantedCameraXRotation = Mathf.Clamp(wantedCameraXRotation, bottomAngleView, topAngleView);
 }
 
 	/*

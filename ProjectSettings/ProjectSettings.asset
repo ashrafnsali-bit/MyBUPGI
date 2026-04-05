@@ -167,7 +167,7 @@ PlayerSettings:
   androidMaxAspectRatio: 2.4
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Standalone: com.Unity-Technologies.com.unity.template.hdrp-blank
+    Standalone: com.ashraf.BUPGI
   buildNumber:
     Standalone: 0
     VisionOS: 0
@@ -845,12 +845,15 @@ PlayerSettings:
   platformArchitecture: {}
   scriptingBackend:
     Android: 1
-  il2cppCompilerConfiguration: {}
+  il2cppCompilerConfiguration:
+    Android: 0
   il2cppCodeGeneration:
     Android: 1
   il2cppStacktraceInformation: {}
-  managedStrippingLevel: {}
-  incrementalIl2cppBuild: {}
+  managedStrippingLevel:
+    Android: 3
+  incrementalIl2cppBuild:
+    Android: 0
   suppressCommonWarnings: 1
   allowUnsafeCode: 0
   useDeterministicCompilation: 1

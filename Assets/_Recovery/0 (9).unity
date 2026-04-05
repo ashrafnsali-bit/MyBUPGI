@@ -26,7 +26,7 @@ RenderSettings:
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 2100000, guid: c5f7cede6a925514386b816bbae7e90e, type: 2}
+  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -1438,18 +1438,6 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
-    - target: {fileID: 1524973500649278833, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: weaponPrefab
-      value: 
-      objectReference: {fileID: 167390, guid: d263be518b43c45958a9fabf6650fd2d, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: muzzleFlash
-      value: 
-      objectReference: {fileID: 199458, guid: 51b76f616384d4946bed4ecc9a6c2c3e, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: bulletPrefab
-      value: 
-      objectReference: {fileID: 128836, guid: c9e619a669d974fd28b5c89e43f2bce2, type: 3}
     - target: {fileID: 7413784245466495545, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
       propertyPath: m_LocalPosition.x
       value: 8.73
@@ -9275,18 +9263,6 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
-    - target: {fileID: 1524973500649278833, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: weaponPrefab
-      value: 
-      objectReference: {fileID: 167390, guid: d263be518b43c45958a9fabf6650fd2d, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: muzzleFlash
-      value: 
-      objectReference: {fileID: 199458, guid: 51b76f616384d4946bed4ecc9a6c2c3e, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: bulletPrefab
-      value: 
-      objectReference: {fileID: 128836, guid: c9e619a669d974fd28b5c89e43f2bce2, type: 3}
     - target: {fileID: 7413784245466495545, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
       propertyPath: m_LocalPosition.x
       value: 14.6
@@ -10853,18 +10829,6 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
-    - target: {fileID: 1524973500649278833, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: weaponPrefab
-      value: 
-      objectReference: {fileID: 167390, guid: d263be518b43c45958a9fabf6650fd2d, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: muzzleFlash
-      value: 
-      objectReference: {fileID: 199458, guid: 51b76f616384d4946bed4ecc9a6c2c3e, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: bulletPrefab
-      value: 
-      objectReference: {fileID: 128836, guid: c9e619a669d974fd28b5c89e43f2bce2, type: 3}
     - target: {fileID: 7413784245466495545, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
       propertyPath: m_LocalPosition.x
       value: 14.6
@@ -13140,18 +13104,6 @@ PrefabInstance:
       propertyPath: m_Controller
       value: 
       objectReference: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
-    - target: {fileID: 1524973500649278833, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: weaponPrefab
-      value: 
-      objectReference: {fileID: 167390, guid: d263be518b43c45958a9fabf6650fd2d, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: muzzleFlash
-      value: 
-      objectReference: {fileID: 199458, guid: 51b76f616384d4946bed4ecc9a6c2c3e, type: 3}
-    - target: {fileID: 3144390541034672086, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
-      propertyPath: bulletPrefab
-      value: 
-      objectReference: {fileID: 128836, guid: c9e619a669d974fd28b5c89e43f2bce2, type: 3}
     - target: {fileID: 7413784245466495545, guid: 0dc54632582465844b26c5c66ca00ada, type: 3}
       propertyPath: m_LocalPosition.x
       value: 8.73
@@ -23453,7 +23405,7 @@ Light:
   m_Enabled: 1
   serializedVersion: 12
   m_Type: 1
-  m_Color: {r: 0.9852941, g: 0.9748016, b: 0.9635597, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 1.5
   m_Range: 10
   m_SpotAngle: 30
