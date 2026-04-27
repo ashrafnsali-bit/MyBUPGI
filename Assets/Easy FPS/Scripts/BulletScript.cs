@@ -9,6 +9,13 @@ public class BulletScript : MonoBehaviour {
 	public bool isEnemyBullet = false;
 	public GameObject owner; 
 	RaycastHit hit;
+	
+	[Header("Penetration Settings")]
+	[Tooltip("How many solid objects the bullet can pass through before being destroyed.")]
+	public int maxPenetrations = 0;
+	[Tooltip("Multiplier applied to damage after each penetration (e.g. 0.5 means damage is halved).")]
+	public float damageFalloff = 0.5f;
+	private int currentPenetrations = 0;
 	[Tooltip("Prefab of wall damange hit. The object needs 'LevelPart' tag to create decal on it.")]
 	public GameObject decalHitWall;
 	[Tooltip("Decal will need to be sligtly infront of the wall so it doesnt cause rendeing problems so for best feel put from 0.01-0.1.")]
@@ -105,20 +112,37 @@ public class BulletScript : MonoBehaviour {
 						if (debugBullets) Debug.Log(gameObject.name + " (Player Bullet) HIT ENEMY: " + enemy.name);
 						enemy.TakeDamage(damage);
 						if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+						
+						// NEW: UI Feedback
+						FloatingDamage.Create(hit.point, (int)damage);
+						if (UIManager.instance != null) UIManager.instance.ShowHitMarker();
+						GunScript.HitMarkerSound();
+
 						Destroy(gameObject);
 						return;
 					}
 				} 
 				
 				// FALLBACK: If tagged Enemy but no EnemyAI, try to find ANY TakeDamage method or just log loudly
-				if (hit.transform.CompareTag("Enemy") || hit.transform.CompareTag("Dummie")) {
+				bool isEnemyTarget = false;
+				try {
+					isEnemyTarget = hit.transform.CompareTag("Enemy") || hit.transform.CompareTag("Dummie") || hit.transform.tag == "ExplosiveBarrel";
+				} catch { }
+
+				if (isEnemyTarget) {
 					Debug.LogWarning("Bullet hit an object tagged '" + hit.transform.tag + "' (" + hit.transform.name + ") but it has no EnemyAI component! Checking for other damageable components...");
 					// Some objects might have health scripts named differently
 					hit.transform.SendMessage("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
 					
 					// If we sent message, we consider it a hit
 					hasDealtDamage = true;
-					if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+					if (bloodEffect && hit.transform.tag != "ExplosiveBarrel") Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+					
+					// NEW: UI Feedback
+					FloatingDamage.Create(hit.point, (int)damage);
+					if (UIManager.instance != null) UIManager.instance.ShowHitMarker();
+					GunScript.HitMarkerSound();
+
 					Destroy(gameObject);
 					return;
 				}
@@ -139,9 +163,32 @@ public class BulletScript : MonoBehaviour {
 						}
 					}
 					
-					if (debugBullets) Debug.Log(gameObject.name + " hit solid environment: " + hit.transform.name + " at distance " + hit.distance);
-					Destroy(gameObject);
-					return;
+					// Penetration Logic
+					bool isPenetrable = false;
+					try {
+						string objName = hit.transform.name.ToLower();
+						isPenetrable = objName.Contains("container") || objName.Contains("hangar") || objName.Contains("oil_tank") || hit.transform.CompareTag("Container");
+					} catch { }
+
+					if (isPenetrable || currentPenetrations < maxPenetrations) {
+						if (!isPenetrable) currentPenetrations++; // Only count towards limit if it's a normal wall
+						// Don't reduce damage heavily for penetrable objects to make sure enemies inside can be killed
+						if (!isPenetrable) damage *= damageFalloff; 
+						
+						if (debugBullets) Debug.Log(gameObject.name + " penetrated solid environment: " + hit.transform.name);
+						
+						// FIX: Ignore physical collision so the bullet continues flying through the wall
+						Collider myCollider = GetComponent<Collider>();
+						if (myCollider != null && hit.collider != null) {
+							Physics.IgnoreCollision(myCollider, hit.collider);
+						}
+						
+						continue; // Continue checking other hits in the SphereCast
+					} else {
+						if (debugBullets) Debug.Log(gameObject.name + " hit solid environment: " + hit.transform.name + " at distance " + hit.distance);
+						Destroy(gameObject);
+						return;
+					}
 				}
 				else if (debugBullets) 
 				{

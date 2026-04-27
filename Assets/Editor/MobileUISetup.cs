@@ -24,7 +24,10 @@ public class MobileUISetup : EditorWindow
         Canvas canvas = canvasObj.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 999;
-        canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight = 0.5f;
         canvasObj.AddComponent<GraphicRaycaster>();
 
         // 3. Joystick Area (Invisible background to catch drags)
@@ -41,16 +44,17 @@ public class MobileUISetup : EditorWindow
         GameObject joystickContainer = new GameObject("JoystickContainer");
         joystickContainer.transform.SetParent(joystickArea.transform);
         RectTransform containerRect = joystickContainer.AddComponent<RectTransform>();
-        containerRect.anchorMin = new Vector2(0.5f, 0.5f);
-        containerRect.anchorMax = new Vector2(0.5f, 0.5f);
+        // Anchor to bottom left so it stays in a fixed spot
+        containerRect.anchorMin = new Vector2(0, 0);
+        containerRect.anchorMax = new Vector2(0, 0);
         containerRect.pivot = new Vector2(0.5f, 0.5f);
-        containerRect.anchoredPosition = Vector2.zero;
-        containerRect.sizeDelta = new Vector2(300, 300);
+        // Position it nicely in the bottom left corner
+        containerRect.anchoredPosition = new Vector2(150, 150); 
+        containerRect.sizeDelta = new Vector2(180, 180); // Very small and proportionate
 
         Image containerImage = joystickContainer.AddComponent<Image>();
         containerImage.color = new Color(1, 1, 1, 0.2f);
         containerImage.raycastTarget = true;
-        joystickContainer.AddComponent<MobileJoystick>();
 
         // 5. Handle
         GameObject joystickHandle = new GameObject("Handle");
@@ -60,11 +64,14 @@ public class MobileUISetup : EditorWindow
         handleRect.anchorMax = new Vector2(0.5f, 0.5f);
         handleRect.pivot = new Vector2(0.5f, 0.5f);
         handleRect.anchoredPosition = Vector2.zero;
-        handleRect.sizeDelta = new Vector2(100, 100);
+        handleRect.sizeDelta = new Vector2(60, 60);
 
         Image handleImage = joystickHandle.AddComponent<Image>();
         handleImage.color = new Color(1, 1, 1, 0.5f);
         handleImage.raycastTarget = false;
+
+        // Add component after children are created so Awake can find them
+        joystickContainer.AddComponent<MobileJoystick>();
 
         // 6. Debug Text
         GameObject debugObj = new GameObject("DebugText");

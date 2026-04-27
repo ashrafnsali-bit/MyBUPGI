@@ -8,6 +8,9 @@ TagManager:
   - Dummie
   - Enemy
   - LevelPart
+  - SecondCamera
+  - BulletSpawn
+  - ExplosiveBarrel
   layers:
   - Default
   - TransparentFX
@@ -19,6 +22,7 @@ TagManager:
   - 
   - 
   - Player
+  - 
   - 
   - 
   - 

@@ -10,7 +10,7 @@ public class PlayerMovementScript : MonoBehaviour {
 	[Tooltip("Assign players camera here")]
 	[HideInInspector]public Transform cameraMain;
 	[Tooltip("Force that moves player into jump")]
-	public float jumpForce = 500;
+	public float jumpForce = 1500; // Increased default to allow jumping over obstacles
 	[Tooltip("Position of the camera inside the player")]
 	[HideInInspector]public Vector3 cameraPosition;
 
@@ -52,9 +52,14 @@ public class PlayerMovementScript : MonoBehaviour {
 		);
 		bool isMoving = Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0;
 
+		float h = Input.GetAxis ("Horizontal");
+		float v = Input.GetAxis ("Vertical");
+
 		#if UNITY_ANDROID || UNITY_IOS
-		float h = MobileJoystick.InputVector.x;
-		float v = MobileJoystick.InputVector.y;
+		if (Mathf.Abs(h) < 0.01f && Mathf.Abs(v) < 0.01f) {
+			h = MobileJoystick.InputVector.x;
+			v = MobileJoystick.InputVector.y;
+		}
 		
 		// TOUCH TO MOVE FORWARD: If not using joystick, check for any touch on screen
 		if (Mathf.Abs(v) < 0.1f && Input.GetMouseButton(0)) {
@@ -63,17 +68,9 @@ public class PlayerMovementScript : MonoBehaviour {
 				v = 1.0f; // Move forward
 			}
 		}
+		#endif
 
 		isMoving = Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f;
-		
-		// Optional: Debug logs for mobile movement
-		if (isMoving) {
-			// Debug.Log($"Mobile Move: h={h}, v={v}");
-		}
-		#else
-		float h = Input.GetAxis ("Horizontal");
-		float v = Input.GetAxis ("Vertical");
-		#endif
 
 		bool actuallyGrounded = grounded || RayCastGrounded();
 
@@ -103,6 +100,7 @@ public class PlayerMovementScript : MonoBehaviour {
 	*/
 	void Jumping(){
 		if (Input.GetKeyDown (KeyCode.Space) && grounded) {
+			// Using standard force to be safe with large values in the inspector
 			rb.AddRelativeForce (Vector3.up * jumpForce);
 			if (_jumpSound)
 				_jumpSound.Play ();

@@ -12,14 +12,28 @@ public class MobileJoystick : MonoBehaviour, IDragHandler, IPointerUpHandler, IP
 
     void Awake()
     {
+#if !UNITY_ANDROID && !UNITY_IOS
+        gameObject.SetActive(false);
+        return;
+#endif
         container = GetComponent<RectTransform>();
         handle = transform.Find("Handle").GetComponent<RectTransform>();
-        joystickRange = container.sizeDelta.x / 2f;
         InputVector = Vector2.zero;
-        
+
         // Ensure the image components are correctly setup
         Image img = GetComponent<Image>();
         if (img != null) img.raycastTarget = true;
+    }
+
+    void Start()
+    {
+#if !UNITY_ANDROID && !UNITY_IOS
+        return;
+#endif
+        // Force the canvas to update layout BEFORE reading the size,
+        // so joystickRange is always correct for the current screen size.
+        Canvas.ForceUpdateCanvases();
+        joystickRange = container.rect.width / 2f;
     }
 
     public void OnDrag(PointerEventData eventData)

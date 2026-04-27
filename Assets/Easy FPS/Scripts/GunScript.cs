@@ -414,7 +414,9 @@ public class GunScript : MonoBehaviour {
 	* Sounds that is called upon hitting the target.
 	*/
 	public static void HitMarkerSound(){
-		hitMarker.Play();
+		if (hitMarker != null) {
+			hitMarker.Play();
+		}
 	}
 
 	[Tooltip("Array of muzzel flashes, randmly one will appear after each bullet.")]
@@ -462,9 +464,14 @@ public class GunScript : MonoBehaviour {
 					print ("Missing 'Shoot Sound Source'.");
 
 				RecoilMath();
+				if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.1f, 0.05f);
+#if UNITY_ANDROID || UNITY_IOS
+				Handheld.Vibrate();
+#endif
 
 				waitTillNextFire = 1;
 				bulletsInTheGun -= 1;
+				if (UIManager.instance != null) UIManager.instance.UpdateAmmo((int)bulletsInTheGun, (int)bulletsIHave);
 			}
 				
 			else{
@@ -525,6 +532,7 @@ public class GunScript : MonoBehaviour {
 						bulletsInTheGun += valueForBoth;
 					}
 				}
+				if (UIManager.instance != null) UIManager.instance.UpdateAmmo((int)bulletsInTheGun, (int)bulletsIHave);
 			} else {
 				reloadSound_source.Stop ();
 
