@@ -14,6 +14,22 @@ public class PlayerHealth : MonoBehaviour
     {
         currentHealth = maxHealth;
         if (UIManager.instance != null) UIManager.instance.UpdateHealth((int)currentHealth, (int)maxHealth);
+        
+        // Auto-assign hit sound if missing
+        if (hitSound == null)
+        {
+            var pms = GetComponent<PlayerMovementScript>();
+            if (pms != null && pms._hitSound != null)
+            {
+                hitSound = pms._hitSound.clip;
+            }
+        }
+        
+        // Auto-attach Grenade system
+        if (GetComponent<PlayerGrenades>() == null)
+        {
+            gameObject.AddComponent<PlayerGrenades>();
+        }
     }
 
     public void TakeDamage(float amount)
@@ -26,7 +42,11 @@ public class PlayerHealth : MonoBehaviour
         if (hitSound) AudioSource.PlayClipAtPoint(hitSound, transform.position);
         Debug.Log("Player taken damage: " + amount + ". Current Health: " + currentHealth);
         
-        if (UIManager.instance != null) UIManager.instance.UpdateHealth((int)currentHealth, (int)maxHealth);
+        if (UIManager.instance != null) 
+        {
+            UIManager.instance.UpdateHealth((int)currentHealth, (int)maxHealth);
+            UIManager.instance.ShowDamageFlash();
+        }
         if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.3f, 0.2f);
 #if UNITY_ANDROID || UNITY_IOS
         Handheld.Vibrate();

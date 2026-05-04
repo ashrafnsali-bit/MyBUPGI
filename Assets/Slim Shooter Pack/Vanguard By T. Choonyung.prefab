@@ -123,9 +123,17 @@ MonoBehaviour:
   damage: 10
   sightRange: 50
   attackRange: 8
+  attackHysteresis: 2
   moveSpeed: 5
   rotationSpeed: 10
   fireRate: 2
+  wanderRadius: 15
+  wanderWaitTime: 3
+  enableHiveMind: 1
+  alertRadius: 30
+  retreatHealthThreshold: 0.3
+  dodgeChance: 0.4
+  dodgeCooldown: 3
   firePoint: {fileID: 0}
   muzzleFlash: {fileID: 0}
   shootSound: {fileID: 0}
@@ -150,7 +158,7 @@ Animator:
   m_GameObject: {fileID: 4768897461566122006}
   m_Enabled: 1
   m_Avatar: {fileID: 9000000, guid: 6de71833e276cfa4096b77f4ec4e856a, type: 3}
-  m_Controller: {fileID: 9100000, guid: 9913cc59f44dbb141ae59d5208e9b4f1, type: 2}
+  m_Controller: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
   m_ApplyRootMotion: 0

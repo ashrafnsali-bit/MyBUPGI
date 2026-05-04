@@ -23,9 +23,27 @@ public class PlayerMovementScript : MonoBehaviour {
 		cameraMain = transform.Find("Main Camera").transform;
 		bulletSpawn = cameraMain.Find ("BulletSpawn").transform;
 		ignoreLayer = 1 << LayerMask.NameToLayer ("Player");
+        
+        // Ensure the placeholder capsule mesh is hidden
+        MeshRenderer mr = GetComponent<MeshRenderer>();
+        if (mr != null) mr.enabled = false;
+        
+        // CRITICAL FIX: If the player was accidentally saved while crouching in the Editor, 
+        // their scale might be stuck at 0.6. We must force it back to 1.
+        transform.localScale = Vector3.one;
+        
+        // CRITICAL FIX: If the camera was also saved while crouching, it's permanently too low!
+        // We force it back to the standard height of 0.8.
+        cameraMain.localPosition = new Vector3(0, 0.8f, 0);
+        defaultCameraLocalPos = cameraMain.localPosition;
+        
+        // Prevent player falling through ground over time
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 	}
-	private Vector3 slowdownV;
+	private Vector2 slowdownV;
 	private Vector2 horizontalMovement;
+	private Vector3 defaultCameraLocalPos;
 	/*
 	* Raycasting for meele attacks and input movement handling here.
 	*/
@@ -76,10 +94,9 @@ public class PlayerMovementScript : MonoBehaviour {
 
 		if (actuallyGrounded) {
 			if (!isMoving) {
-				rb.linearVelocity = Vector3.SmoothDamp(rb.linearVelocity,
-					new Vector3(0,rb.linearVelocity.y,0),
-					ref slowdownV,
-					deaccelerationSpeed);
+				Vector2 currentVel = new Vector2(rb.linearVelocity.x, rb.linearVelocity.z);
+				Vector2 newVel = Vector2.SmoothDamp(currentVel, Vector2.zero, ref slowdownV, deaccelerationSpeed);
+				rb.linearVelocity = new Vector3(newVel.x, rb.linearVelocity.y, newVel.y);
 			}
 			rb.AddRelativeForce (h * accelerationSpeed * Time.deltaTime, 0, v * accelerationSpeed * Time.deltaTime);
 		} else {
@@ -114,14 +131,17 @@ public class PlayerMovementScript : MonoBehaviour {
 	* Update loop calling other stuff
 	*/
 	void Update(){
-		
+        // Prevent falling infinitely
+        if (transform.position.y < -30f) {
+            PlayerHealth ph = GetComponent<PlayerHealth>();
+            if (ph != null) ph.TakeDamage(9999);
+        }
 
 		Jumping ();
 
 		Crouching();
 
 		WalkingSound ();
-
 
 	}//end update
 
@@ -175,15 +195,15 @@ public class PlayerMovementScript : MonoBehaviour {
 	}
 
 	/*
-	* If player toggle the crouch it will scale the player to appear that is crouching
+	* If player toggle the crouch it will lower the camera instead of scaling the body
+	* to prevent the physics engine from pushing the player through the floor.
 	*/
 	void Crouching(){
 		if(Input.GetKey(KeyCode.C)){
-			transform.localScale = Vector3.Lerp(transform.localScale, new Vector3(1,0.6f,1), Time.deltaTime * 15);
+			cameraMain.localPosition = Vector3.Lerp(cameraMain.localPosition, defaultCameraLocalPos - new Vector3(0, 0.5f, 0), Time.deltaTime * 15);
 		}
 		else{
-			transform.localScale = Vector3.Lerp(transform.localScale, new Vector3(1,1,1), Time.deltaTime * 15);
-
+			cameraMain.localPosition = Vector3.Lerp(cameraMain.localPosition, defaultCameraLocalPos, Time.deltaTime * 15);
 		}
 	}
 

@@ -126,7 +126,7 @@ public class BulletScript : MonoBehaviour {
 				// FALLBACK: If tagged Enemy but no EnemyAI, try to find ANY TakeDamage method or just log loudly
 				bool isEnemyTarget = false;
 				try {
-					isEnemyTarget = hit.transform.CompareTag("Enemy") || hit.transform.CompareTag("Dummie") || hit.transform.tag == "ExplosiveBarrel";
+					isEnemyTarget = hit.transform.tag == "Enemy" || hit.transform.tag == "Dummie" || hit.transform.tag == "ExplosiveBarrel";
 				} catch { }
 
 				if (isEnemyTarget) {
@@ -155,7 +155,7 @@ public class BulletScript : MonoBehaviour {
 					if (decalHitWall) {
 						bool isLevelPart = false;
 						try {
-							isLevelPart = hit.transform.CompareTag("LevelPart");
+							isLevelPart = hit.transform.tag == "LevelPart";
 						} catch { }
 						
 						if (isLevelPart) {
@@ -167,7 +167,7 @@ public class BulletScript : MonoBehaviour {
 					bool isPenetrable = false;
 					try {
 						string objName = hit.transform.name.ToLower();
-						isPenetrable = objName.Contains("container") || objName.Contains("hangar") || objName.Contains("oil_tank") || hit.transform.CompareTag("Container");
+						isPenetrable = objName.Contains("container") || objName.Contains("hangar") || objName.Contains("oil_tank") || hit.transform.tag == "Container";
 					} catch { }
 
 					if (isPenetrable || currentPenetrations < maxPenetrations) {

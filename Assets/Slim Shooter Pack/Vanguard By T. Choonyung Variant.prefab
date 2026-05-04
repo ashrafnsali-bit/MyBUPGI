@@ -8,6 +8,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 2973453957755751751, guid: b9fef030445335645bc12ce3ec8d2bec, type: 3}
+      propertyPath: m_Controller
+      value: 
+      objectReference: {fileID: 9100000, guid: 43ae562914e993f448f70afe4fc37ae4, type: 2}
     - target: {fileID: 4768897461566122006, guid: b9fef030445335645bc12ce3ec8d2bec, type: 3}
       propertyPath: m_Name
       value: Vanguard By T. Choonyung Variant

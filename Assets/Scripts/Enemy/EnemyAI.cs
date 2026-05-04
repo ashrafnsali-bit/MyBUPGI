@@ -12,13 +12,20 @@ public class EnemyAI : MonoBehaviour
     public float attackHysteresis = 2f; // Buffer to prevent jittery state switching
     public float moveSpeed = 5;
     public float rotationSpeed = 10;
-    public float fireRate = 0.4f; // Slower shooting
+    public float fireRate = 2.5f; // Shots per second. Changed from 0.4 to 2.5 for faster shooting
     
     [Header("Natural Movement")]
     public float wanderRadius = 15f; 
     public float wanderWaitTime = 3f;
     private float nextWanderTime;
     private bool isWandering = false;
+
+    [Header("Tactical AI Options")]
+    public bool enableHiveMind = true;
+    public float alertRadius = 30f;
+    public float retreatHealthThreshold = 0.3f; // 30% health
+    public float dodgeChance = 0.4f; // 40% chance to dodge
+    public float dodgeCooldown = 3f;
 
     [Header("References")]
     public Transform firePoint;
@@ -31,7 +38,7 @@ public class EnemyAI : MonoBehaviour
 
     [Header("Setup")]
     public float modelYOffset = 0;
-    public bool autoFixHeight = false;
+    public bool autoFixHeight = true; // Changed to true by default to prevent sinking
     public string speedParameter = "Speed";
     public string shootTrigger = "Shoot";
     public string hitTrigger = "Hit";
@@ -45,6 +52,17 @@ public class EnemyAI : MonoBehaviour
     private float nextPathUpdateTime;
     private bool isDead = false;
     private bool isCurrentlyAttacking = false;
+    private float nextStrafeTime;
+    private Vector3 strafeDestination;
+    private bool isReloadingBurst = false;
+    private float burstReloadTime;
+    private int burstShotsFired = 0;
+    
+    // AI Tracking
+    private float nextDodgeTime;
+    private float flinchEndTime;
+    private bool isRetreating = false;
+    private bool hasAlertedOthers = false;
 
     void Awake()
     {
@@ -52,7 +70,17 @@ public class EnemyAI : MonoBehaviour
         if (agent == null) agent = gameObject.AddComponent<NavMeshAgent>();
         
         // AUTO-SETUP: Animator (Recursive Search)
-        anim = GetComponentInChildren<Animator>();
+        Animator[] anims = GetComponentsInChildren<Animator>();
+        foreach (var a in anims)
+        {
+            // Prefer the animator that has an avatar (the actual 3D model) or a controller
+            if (a.avatar != null || a.runtimeAnimatorController != null)
+            {
+                anim = a;
+                break;
+            }
+        }
+        if (anim == null && anims.Length > 0) anim = anims[0];
         
         // NAVIGATION TUNING: Snappier movement and better avoidance
         agent.speed = moveSpeed;
@@ -92,13 +120,22 @@ public class EnemyAI : MonoBehaviour
             bulletPrefab = Resources.Load<GameObject>("Bullet");
             if (bulletPrefab == null)
             {
-                // Try finding it by raw path if Resources fail (simplified approach for this user's project structure)
-                // Note: Resources.Load only works if it's in a Resources folder.
-                // Since user has "Easy FPS/Prefabs/Bullet.prefab", we might need to rely on inspector assignment
-                // OR try to load from a known Resources path if I move it there.
-                // For now, let's just log a warning and use the raycast fallback.
                 Debug.LogWarning("EnemyAI: Bullet Prefab is missing! Creating a fallback sphere.");
                 GenerateFallbackBullet();
+            }
+        }
+
+        // AUTO-SETUP: Shoot Sound
+        if (shootSound == null)
+        {
+            GunScript[] guns = Resources.FindObjectsOfTypeAll<GunScript>();
+            foreach (var g in guns)
+            {
+                if (g.shoot_sound_source != null && g.shoot_sound_source.clip != null)
+                {
+                    shootSound = g.shoot_sound_source.clip;
+                    break;
+                }
             }
         }
 
@@ -175,8 +212,22 @@ public class EnemyAI : MonoBehaviour
     {
         if (isDead) return;
         
+        // Kill enemy if they fall off the map
+        if (transform.position.y < -50f) 
+        {
+            Die();
+            return;
+        }
+        
         if (player == null) {
             Debug.LogWarning("EnemyAI: Player is null! Enemy cannot move.");
+            return;
+        }
+
+        // FLINCH MECHANIC: Stun the enemy briefly
+        if (Time.time < flinchEndTime)
+        {
+            if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
             return;
         }
 
@@ -202,11 +253,18 @@ public class EnemyAI : MonoBehaviour
                 Wander();
             }
         }
+        
+        // HIVE MIND ALERT: Alert others when we first spot the player
+        if ((isCurrentlyAttacking || distance <= sightRange) && !hasAlertedOthers && enableHiveMind)
+        {
+            AlertNearbyEnemies();
+        }
     }
 
     void Wander()
     {
         if (agent == null || !agent.isOnNavMesh) return;
+        agent.updateRotation = true; // Ensure they look where they are going when wandering
 
         // If we reached the target or haven't started wandering, pick a new spot after waiting
         if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
@@ -240,6 +298,7 @@ public class EnemyAI : MonoBehaviour
         if (agent != null && agent.isOnNavMesh)
         {
             agent.isStopped = false;
+            agent.speed = moveSpeed; // Restore full speed
             agent.updateRotation = true; // Let NavMesh handle rotation during travel
 
             // PERFORMANCE: Throttle path updates
@@ -260,34 +319,104 @@ public class EnemyAI : MonoBehaviour
 
     void Attack()
     {
-        // Debug.Log("Enemy State: ATTACKING"); // Very spammy, uncomment if needed
         if (agent != null && agent.isOnNavMesh) {
-            agent.isStopped = true;
             agent.updateRotation = false; // Disable NavMesh rotation to face player manually
+            
+            // TACTICAL RETREAT
+            float healthPct = health / maxHealth;
+            isRetreating = (healthPct <= retreatHealthThreshold);
+
+            // TACTICAL MOVEMENT (STRAFING / BACKING AWAY / DODGING)
+            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+            
+            // DODGE LOGIC: Sudden burst of speed to the side to dodge bullets
+            if (Time.time >= nextDodgeTime && Random.value < (dodgeChance * Time.deltaTime)) {
+                float dodgeDir = Random.value > 0.5f ? 1f : -1f;
+                Vector3 dodgePos = transform.position + (transform.right * dodgeDir * 6f);
+                NavMeshHit navHit;
+                if (NavMesh.SamplePosition(dodgePos, out navHit, 4f, NavMesh.AllAreas)) {
+                    strafeDestination = navHit.position;
+                    if (agent != null && agent.isOnNavMesh) agent.SetDestination(strafeDestination);
+                    nextStrafeTime = Time.time + 1.5f; // Pause normal strafing
+                }
+                nextDodgeTime = Time.time + dodgeCooldown;
+            }
+            
+            if (Time.time >= nextStrafeTime)
+            {
+                // Pick a new strafe point every 2-4 seconds
+                float strafeDirection = Random.value > 0.5f ? 1f : -1f;
+                Vector3 strafePos = transform.position + (transform.right * strafeDirection * 4f);
+                
+                // If retreating, or player is too close, move backward
+                if (isRetreating || distanceToPlayer < attackRange * 0.5f) {
+                    strafePos -= transform.forward * 6f; // Move backwards
+                }
+                
+                NavMeshHit navHit;
+                if (UnityEngine.AI.NavMesh.SamplePosition(strafePos, out navHit, 3f, UnityEngine.AI.NavMesh.AllAreas))
+                {
+                    strafeDestination = navHit.position;
+                    if (agent != null && agent.isOnNavMesh) agent.SetDestination(strafeDestination);
+                }
+                nextStrafeTime = Time.time + Random.Range(1.0f, 2.5f); // Faster strafe updates
+            }
+            
+            // Move towards strafe point if valid
+            if (strafeDestination != Vector3.zero && Vector3.Distance(transform.position, strafeDestination) > 0.5f) {
+                agent.isStopped = false;
+                // Move faster when retreating or dodging
+                float currentSpeed = isRetreating ? moveSpeed * 1.2f : moveSpeed * 0.7f;
+                if (Time.time < nextStrafeTime - 1.0f) currentSpeed = moveSpeed * 1.5f; // Dodge burst speed
+                agent.speed = currentSpeed; 
+            } else {
+                agent.isStopped = true;
+            }
         }
         
-        // Face player
+        // Face player (CRITICAL: doing this while moving creates strafing effect)
         Vector3 direction = (player.position - transform.position).normalized;
         direction.y = 0;
         if (direction != Vector3.zero)
         {
             Quaternion lookRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * rotationSpeed * 2.0f); // FASTER: Facinig the player when attacking
+            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * rotationSpeed * 2.0f);
         }
 
-        // Use ground velocity for animation to avoid floating speed values
-        float moveVel = agent.velocity.magnitude / moveSpeed;
-        SafeSetAnimFloat(speedParameter, Mathf.Lerp(anim.GetFloat(speedParameter), 0, Time.deltaTime * 5), 0.05f);
+        // Animation logic: show moving legs while aiming
+        float moveVel = 0f;
+        if (agent != null && !agent.isStopped) moveVel = agent.velocity.magnitude / moveSpeed;
+        SafeSetAnimFloat(speedParameter, Mathf.Lerp(anim.GetFloat(speedParameter), moveVel, Time.deltaTime * 5), 0.05f);
 
         // DEBUG: Visualize attack range
         Debug.DrawLine(transform.position, player.position, Color.red);
 
-        // Check angle - only shoot if facing player properly? Reduced strictness for now.
-        if (Time.time >= lastFireTime + (1f / fireRate))
+        // TACTICAL SHOOTING (BURST FIRE)
+        if (isReloadingBurst)
         {
-            Debug.Log("EnemyAI: Triggering Shoot...");
-            Shoot();
-            lastFireTime = Time.time;
+            if (Time.time >= burstReloadTime)
+            {
+                isReloadingBurst = false;
+                burstShotsFired = 0;
+            }
+        }
+        else
+        {
+            // If fireRate is very low (e.g. 0.4 from old inspector values), we use a max to prevent 2.5s delays
+            float actualFireDelay = 1f / Mathf.Max(fireRate, 2.0f);
+            if (Time.time >= lastFireTime + actualFireDelay)
+            {
+                Shoot();
+                lastFireTime = Time.time;
+                burstShotsFired++;
+                
+                // Reload/Take cover pause after 3-6 shots
+                if (burstShotsFired >= Random.Range(3, 7))
+                {
+                    isReloadingBurst = true;
+                    burstReloadTime = Time.time + Random.Range(0.4f, 0.8f); // Reduced from 1-2.5s for less waiting
+                }
+            }
         }
     }
 
@@ -382,9 +511,48 @@ public class EnemyAI : MonoBehaviour
     {
         if (isDead) return;
         Debug.Log(">>> Enemy " + gameObject.name + " HIT! Damage: " + amount + " Health: " + health + " -> " + (health - amount));
+        
+        // FLINCH MECHANIC: If taking heavy damage, stun briefly
+        if (amount >= 15f && health > amount)
+        {
+            flinchEndTime = Time.time + 0.2f; // Reduced from 0.6f so they don't freeze for too long
+            if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
+        }
+        
         health -= amount;
         SafeSetAnimTrigger(hitTrigger);
+        
+        // Alert others if shot from afar
+        if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
+        
         if (health <= 0) Die();
+    }
+
+    public void AlertNearbyEnemies()
+    {
+        hasAlertedOthers = true;
+        Collider[] cols = Physics.OverlapSphere(transform.position, alertRadius);
+        foreach (Collider col in cols)
+        {
+            EnemyAI ally = col.GetComponentInParent<EnemyAI>();
+            if (ally != null && ally != this && !ally.isDead)
+            {
+                ally.ReceiveAlert(player);
+            }
+        }
+    }
+
+    public void ReceiveAlert(Transform targetPlayer)
+    {
+        if (isDead || targetPlayer == null) return;
+        if (player == null) player = targetPlayer;
+        hasAlertedOthers = true; // Prevent infinite alert loops
+        
+        // Artificially boost sight range to ensure they start chasing immediately
+        float distToTarget = Vector3.Distance(transform.position, player.position);
+        if (sightRange < distToTarget + 5f) {
+            sightRange = distToTarget + 10f;
+        }
     }
 
     void Die()
@@ -404,17 +572,27 @@ public class EnemyAI : MonoBehaviour
 
     private void FixModelHeight()
     {
-        RaycastHit hit;
-        // Raycast from slightly above the enemy downward to find the actual floor
-        if (Physics.Raycast(transform.position + Vector3.up * 1.0f, Vector3.down, out hit, 5.0f, LayerMask.GetMask("Default", "LevelPart")))
-        {
-            // Position model children relative to this root to align feet with ground
-            float distanceToGround = hit.distance - 1.0f; // Subtract the 1.0f offset we added to the ray start
-            foreach (Transform child in transform) {
-                // If the child is the model/visuals, adjust its local Y
-                if (child.GetComponent<Animator>() != null || child.name.ToLower().Contains("mesh") || child.name.ToLower().Contains("body")) {
-                    child.localPosition = new Vector3(child.localPosition.x, -distanceToGround + modelYOffset, child.localPosition.z);
+        // Smart Height Fix using NavMeshAgent.baseOffset to prevent breaking Humanoid Animators
+        if (agent == null) return;
+        
+        foreach (Transform child in transform) {
+            // Find the child that has the visuals
+            if (child.GetComponent<Animator>() != null || child.name.ToLower().Contains("mesh")) {
+                Renderer[] renderers = child.GetComponentsInChildren<Renderer>();
+                if (renderers.Length > 0) {
+                    Bounds b = renderers[0].bounds;
+                    foreach(var r in renderers) b.Encapsulate(r.bounds);
+                    
+                    // If the lowest point of the model is below the root's Y position
+                    if (b.min.y < transform.position.y - 0.1f) {
+                        float diff = transform.position.y - b.min.y;
+                        // Lift the entire agent visually using baseOffset!
+                        agent.baseOffset += (diff + modelYOffset);
+                    } else if (modelYOffset != 0) {
+                        agent.baseOffset += modelYOffset;
+                    }
                 }
+                break; // Only check the main visual child
             }
         }
     }
@@ -460,6 +638,9 @@ public class EnemyAI : MonoBehaviour
 
             // STATUS TEXT: Helps troubleshoot movement issues
             string stateName = isCurrentlyAttacking ? "ATTACK" : (agent.velocity.magnitude > 0.1f ? "CHASE" : "IDLE/WANDER");
+            if (isRetreating) stateName = "RETREATING";
+            if (Time.time < flinchEndTime) stateName = "FLINCHED";
+            
             string navStatus = (agent != null && agent.isOnNavMesh) ? "ON NAVMESH" : "OFF NAVMESH";
             GUI.color = (agent != null && agent.isOnNavMesh) ? Color.white : Color.yellow;
             GUI.Label(new Rect(x + 5, y + barHeight, barWidth, 20), $"[{stateName}] {navStatus}");

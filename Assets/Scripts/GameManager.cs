@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using System.Collections;
 
 public class GameManager : MonoBehaviour
@@ -7,14 +8,27 @@ public class GameManager : MonoBehaviour
     public static GameManager instance;
     public int totalEnemies;
     public bool isGameOver = false;
-    public bool isVictory = false;
 
-    [Header("Wave System")]
-    public int currentWave = 0;
+    [Header("Level System")]
+    public int currentLevel = 1;
+    public int totalKills = 0; // Added to track overall score/kills
     public int enemiesPerWaveBase = 3;
+    public int extraEnemiesPerLevel = 2; // How many more enemies to add each level
     public GameObject enemyPrefabTemplate;
     private Transform player;
-    private bool waveActive = false;
+    private bool levelTransitioning = false;
+
+    // Modern UI Elements
+    private GameObject gameCanvasObj;
+    private Text waveText;
+    private GameObject gameOverPanel;
+    private Text gameOverText;
+    private Button tryAgainButton;
+    private CanvasGroup gameOverCanvasGroup;
+    
+    // Level Announcement UI
+    private Text announcementText;
+    private CanvasGroup announcementCanvasGroup;
 
     void Awake()
     {
@@ -25,16 +39,22 @@ public class GameManager : MonoBehaviour
     {
         player = GameObject.FindGameObjectWithTag("Player")?.transform;
         
-        // Find a template enemy if not assigned
-        if (enemyPrefabTemplate == null)
+        // Safely duplicate the template if it's a scene object that could be killed
+        if (enemyPrefabTemplate != null && enemyPrefabTemplate.activeInHierarchy)
+        {
+            GameObject safeCopy = Instantiate(enemyPrefabTemplate);
+            safeCopy.SetActive(false);
+            safeCopy.name = "EnemyTemplate_SafeCopy";
+            enemyPrefabTemplate = safeCopy;
+        }
+        else if (enemyPrefabTemplate == null)
         {
             EnemyAI existing = Object.FindFirstObjectByType<EnemyAI>();
             if (existing != null) 
             {
-                // We'll hide the template and use it to spawn others
                 enemyPrefabTemplate = Instantiate(existing.gameObject);
                 enemyPrefabTemplate.SetActive(false);
-                enemyPrefabTemplate.name = "EnemyTemplate";
+                enemyPrefabTemplate.name = "EnemyTemplate_SafeCopy";
             }
         }
 
@@ -45,27 +65,286 @@ public class GameManager : MonoBehaviour
             ui.AddComponent<UIManager>();
         }
 
+        // Ensure EventSystem exists for UI interactions (Buttons)
+        if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+            GameObject esObj = new GameObject("EventSystem");
+            esObj.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+        }
+
         // Add CameraShake dynamically if not exists
         if (Camera.main != null && Camera.main.GetComponent<CameraShake>() == null)
         {
             Camera.main.gameObject.AddComponent<CameraShake>();
         }
 
+        SetupGameUI();
         RefreshEnemyCount();
-        StartCoroutine(WaveRoutine());
+        
+        // If there are no enemies in the scene, start level 1 immediately
+        if (totalEnemies == 0)
+        {
+            StartCoroutine(SpawnEnemies(enemiesPerWaveBase));
+        }
+        else
+        {
+            ShowAnnouncement("LEVEL " + currentLevel + " START", 3f);
+        }
     }
 
-    IEnumerator WaveRoutine()
+    void SetupGameUI()
     {
-        // Removed endless wave system so the player can actually win
-        yield break;
+        gameCanvasObj = new GameObject("GameManagerCanvas");
+        Canvas canvas = gameCanvasObj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 20; // Higher than UIManager
+        CanvasScaler scaler = gameCanvasObj.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        gameCanvasObj.AddComponent<GraphicRaycaster>();
+
+        // Top HUD Background Panel
+        GameObject topPanelObj = new GameObject("TopHUDPanel");
+        topPanelObj.transform.SetParent(gameCanvasObj.transform, false);
+        Image topPanelImg = topPanelObj.AddComponent<Image>();
+        topPanelImg.color = new Color(0.05f, 0.05f, 0.05f, 0.85f); // Sleek dark background
+        RectTransform topRt = topPanelObj.GetComponent<RectTransform>();
+        topRt.anchorMin = new Vector2(0, 1);   // Top-Left
+        topRt.anchorMax = new Vector2(0, 1);   // Top-Left
+        topRt.pivot = new Vector2(0, 1);       // Pivot at Top-Left
+        topRt.anchoredPosition = new Vector2(20, -20); // 20px margin from top-left corner
+        topRt.sizeDelta = new Vector2(400, 100); // Slightly smaller to look neat on the side
+
+        // Golden Accent Line at the bottom of the panel
+        GameObject accentObj = new GameObject("AccentLine");
+        accentObj.transform.SetParent(topPanelObj.transform, false);
+        Image accentImg = accentObj.AddComponent<Image>();
+        accentImg.color = new Color(1f, 0.75f, 0f, 1f); // Vibrant Gold
+        RectTransform accRt = accentObj.GetComponent<RectTransform>();
+        accRt.anchorMin = new Vector2(0, 0);
+        accRt.anchorMax = new Vector2(1, 0);
+        accRt.pivot = new Vector2(0.5f, 0);
+        accRt.offsetMin = new Vector2(0, 0);
+        accRt.offsetMax = new Vector2(0, 4); // 4px thick line
+
+        // Wave Text
+        GameObject waveObj = new GameObject("WaveText");
+        waveObj.transform.SetParent(topPanelObj.transform, false);
+        waveText = waveObj.AddComponent<Text>();
+        waveText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        waveText.fontSize = 45;
+        waveText.fontStyle = FontStyle.Bold;
+        waveText.color = Color.white;
+        waveText.alignment = TextAnchor.MiddleCenter;
+        waveText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        waveText.verticalOverflow = VerticalWrapMode.Overflow;
+        RectTransform wrt = waveText.GetComponent<RectTransform>();
+        wrt.anchorMin = new Vector2(0, 0);
+        wrt.anchorMax = new Vector2(1, 1);
+        wrt.pivot = new Vector2(0.5f, 0.5f);
+        wrt.offsetMin = new Vector2(10, 10);
+        wrt.offsetMax = new Vector2(-10, -10);
+        Outline wOut = waveObj.AddComponent<Outline>();
+        wOut.effectColor = new Color(0, 0, 0, 1f);
+        wOut.effectDistance = new Vector2(2, -2);
+
+        // Announcement Text
+        GameObject annObj = new GameObject("AnnouncementText");
+        annObj.transform.SetParent(gameCanvasObj.transform, false);
+        announcementText = annObj.AddComponent<Text>();
+        announcementText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        announcementText.fontSize = 80;
+        announcementText.fontStyle = FontStyle.Bold;
+        announcementText.color = Color.yellow;
+        announcementText.alignment = TextAnchor.MiddleCenter;
+        RectTransform annRt = announcementText.GetComponent<RectTransform>();
+        annRt.anchorMin = new Vector2(0.5f, 0.5f);
+        annRt.anchorMax = new Vector2(0.5f, 0.5f);
+        annRt.anchoredPosition = new Vector2(0, 200);
+        annRt.sizeDelta = new Vector2(1200, 200);
+        Outline annOut = annObj.AddComponent<Outline>();
+        annOut.effectColor = Color.black;
+        annOut.effectDistance = new Vector2(2, -2);
+        
+        announcementCanvasGroup = annObj.AddComponent<CanvasGroup>();
+        announcementCanvasGroup.alpha = 0f;
+
+        // Game Over Panel
+        gameOverPanel = new GameObject("GameOverPanel");
+        gameOverPanel.transform.SetParent(gameCanvasObj.transform, false);
+        Image panelImg = gameOverPanel.AddComponent<Image>();
+        panelImg.color = new Color(0, 0, 0, 0.85f); // Dark background
+        RectTransform prt = gameOverPanel.GetComponent<RectTransform>();
+        prt.anchorMin = Vector2.zero;
+        prt.anchorMax = Vector2.one;
+        prt.offsetMin = Vector2.zero;
+        prt.offsetMax = Vector2.zero;
+        
+        gameOverCanvasGroup = gameOverPanel.AddComponent<CanvasGroup>();
+        gameOverCanvasGroup.alpha = 0f; // Hidden initially
+        gameOverPanel.SetActive(false);
+
+        // Game Over Text
+        GameObject goTextObj = new GameObject("GameOverText");
+        goTextObj.transform.SetParent(gameOverPanel.transform, false);
+        gameOverText = goTextObj.AddComponent<Text>();
+        gameOverText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        gameOverText.fontSize = 100;
+        gameOverText.fontStyle = FontStyle.Bold;
+        gameOverText.alignment = TextAnchor.MiddleCenter;
+        RectTransform gort = gameOverText.GetComponent<RectTransform>();
+        gort.anchorMin = new Vector2(0.5f, 0.5f);
+        gort.anchorMax = new Vector2(0.5f, 0.5f);
+        gort.anchoredPosition = new Vector2(0, 100);
+        gort.sizeDelta = new Vector2(800, 200);
+        Outline goOut = goTextObj.AddComponent<Outline>();
+        goOut.effectColor = Color.black;
+        goOut.effectDistance = new Vector2(3, -3);
+
+        // Try Again Button
+        GameObject btnObj = new GameObject("TryAgainButton");
+        btnObj.transform.SetParent(gameOverPanel.transform, false);
+        Image btnImg = btnObj.AddComponent<Image>();
+        btnImg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+        tryAgainButton = btnObj.AddComponent<Button>();
+        tryAgainButton.onClick.AddListener(() => {
+            Time.timeScale = 1f; // Reset time scale!
+            UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+        });
+        RectTransform brt = btnObj.GetComponent<RectTransform>();
+        brt.anchorMin = new Vector2(0.5f, 0.5f);
+        brt.anchorMax = new Vector2(0.5f, 0.5f);
+        brt.anchoredPosition = new Vector2(0, -100);
+        brt.sizeDelta = new Vector2(400, 100);
+        
+        GameObject btnTextObj = new GameObject("Text");
+        btnTextObj.transform.SetParent(btnObj.transform, false);
+        Text btnText = btnTextObj.AddComponent<Text>();
+        btnText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        btnText.fontSize = 50;
+        btnText.color = Color.white;
+        btnText.text = "TRY AGAIN";
+        btnText.alignment = TextAnchor.MiddleCenter;
+        RectTransform btrt = btnText.GetComponent<RectTransform>();
+        btrt.anchorMin = Vector2.zero;
+        btrt.anchorMax = Vector2.one;
+        btrt.offsetMin = Vector2.zero;
+        btrt.offsetMax = Vector2.zero;
+
+        // Quit Game Button
+        GameObject quitObj = new GameObject("QuitButton");
+        quitObj.transform.SetParent(gameOverPanel.transform, false);
+        Image quitImg = quitObj.AddComponent<Image>();
+        quitImg.color = new Color(0.8f, 0.2f, 0.2f, 1f); // Red color
+        Button quitButton = quitObj.AddComponent<Button>();
+        quitButton.onClick.AddListener(() => {
+            Time.timeScale = 1f;
+            Application.Quit();
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#endif
+        });
+        RectTransform qrt = quitObj.GetComponent<RectTransform>();
+        qrt.anchorMin = new Vector2(0.5f, 0.5f);
+        qrt.anchorMax = new Vector2(0.5f, 0.5f);
+        qrt.anchoredPosition = new Vector2(0, -220); // Positioned below Try Again
+        qrt.sizeDelta = new Vector2(400, 100);
+
+        GameObject quitTextObj = new GameObject("Text");
+        quitTextObj.transform.SetParent(quitObj.transform, false);
+        Text quitText = quitTextObj.AddComponent<Text>();
+        quitText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        quitText.fontSize = 50;
+        quitText.color = Color.white;
+        quitText.text = "QUIT GAME";
+        quitText.alignment = TextAnchor.MiddleCenter;
+        RectTransform qtrt = quitText.GetComponent<RectTransform>();
+        qtrt.anchorMin = Vector2.zero;
+        qtrt.anchorMax = Vector2.one;
+        qtrt.offsetMin = Vector2.zero;
+        qtrt.offsetMax = Vector2.zero;
+    }
+
+    void Update()
+    {
+        if (waveText != null && !isGameOver)
+        {
+            waveText.text = "LEVEL " + currentLevel + "\n<size=20>Enemies: " + totalEnemies + " | KILLS: " + totalKills + "</size>";
+        }
+
+        if (isGameOver && gameOverPanel != null)
+        {
+            if (!gameOverPanel.activeSelf)
+            {
+                gameOverPanel.SetActive(true);
+                waveText.gameObject.SetActive(false);
+                announcementText.gameObject.SetActive(false);
+                
+                gameOverText.text = "GAME OVER\n<size=40>Total Kills: " + totalKills + "</size>";
+                gameOverText.color = new Color(1f, 0.2f, 0.2f); // Bright Red
+            }
+            
+            // Fade in the game over panel smoothly (use unscaledDeltaTime because timeScale is 0)
+            if (gameOverCanvasGroup.alpha < 1f)
+            {
+                gameOverCanvasGroup.alpha += Time.unscaledDeltaTime * 2f;
+            }
+        }
+    }
+
+    public void ShowAnnouncement(string message, float duration)
+    {
+        StartCoroutine(AnnouncementRoutine(message, duration));
+    }
+
+    IEnumerator AnnouncementRoutine(string message, float duration)
+    {
+        announcementText.text = message;
+        
+        // Fade in
+        while (announcementCanvasGroup.alpha < 1f)
+        {
+            announcementCanvasGroup.alpha += Time.deltaTime * 3f;
+            yield return null;
+        }
+        
+        yield return new WaitForSeconds(duration);
+        
+        // Fade out
+        while (announcementCanvasGroup.alpha > 0f)
+        {
+            announcementCanvasGroup.alpha -= Time.deltaTime * 2f;
+            yield return null;
+        }
+    }
+
+    IEnumerator LevelCompleteRoutine()
+    {
+        levelTransitioning = true;
+        
+        // Announce completion
+        ShowAnnouncement("LEVEL " + currentLevel + " COMPLETED!", 3f);
+        yield return new WaitForSeconds(4f);
+        
+        // Increment Level
+        currentLevel++;
+        int enemiesToSpawn = enemiesPerWaveBase + ((currentLevel - 1) * extraEnemiesPerLevel);
+        
+        // Announce next level
+        ShowAnnouncement("STARTING LEVEL " + currentLevel, 2f);
+        yield return new WaitForSeconds(2.5f);
+        
+        // Start spawning
+        StartCoroutine(SpawnEnemies(enemiesToSpawn));
+        levelTransitioning = false;
     }
 
     IEnumerator SpawnEnemies(int count)
     {
         if (enemyPrefabTemplate == null)
         {
-            Debug.LogWarning("No enemy template found for Wave System. Add at least one enemy to the scene.");
+            Debug.LogWarning("No enemy template found for Level System. Add at least one enemy to the scene.");
             yield break;
         }
 
@@ -76,10 +355,10 @@ public class GameManager : MonoBehaviour
             Vector3 spawnPos = GetRandomSpawnPosition();
             GameObject newEnemy = Instantiate(enemyPrefabTemplate, spawnPos, Quaternion.identity);
             newEnemy.SetActive(true);
-            newEnemy.name = "WaveEnemy_" + currentWave + "_" + i;
+            newEnemy.name = "LevelEnemy_" + currentLevel + "_" + i;
             
             totalEnemies++;
-            yield return new WaitForSeconds(Random.Range(0.5f, 2f)); // Staggered spawn
+            yield return new WaitForSeconds(Random.Range(0.5f, 1.5f)); // Staggered spawn
         }
     }
 
@@ -87,18 +366,44 @@ public class GameManager : MonoBehaviour
     {
         if (player == null) return Vector3.zero;
 
-        // Spawn in a circle around player, 15-25 units away
-        float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
-        float distance = Random.Range(15f, 25f);
-        Vector3 spawnPos = player.position + new Vector3(Mathf.Cos(angle) * distance, 5f, Mathf.Sin(angle) * distance);
-
-        // Raycast down to find ground
-        RaycastHit hit;
-        if (Physics.Raycast(spawnPos, Vector3.down, out hit, 10f))
+        // Try up to 15 times to find a valid spawn point that is not inside an object
+        for (int i = 0; i < 15; i++)
         {
-            return hit.point + Vector3.up * 0.5f;
+            float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
+            float distance = Random.Range(15f, 25f);
+            Vector3 randomPoint = player.position + new Vector3(Mathf.Cos(angle) * distance, 10f, Mathf.Sin(angle) * distance); // Start higher
+
+            RaycastHit hit;
+            // Raycast down to find ground
+            if (Physics.Raycast(randomPoint, Vector3.down, out hit, 20f))
+            {
+                Vector3 potentialSpawn = hit.point + Vector3.up * 0.5f;
+                
+                // 1. Check if the space is physically clear (not inside a container/wall)
+                // We check a sphere at the spawn height (y+1) to ensure the body fits
+                int blockLayer = ~LayerMask.GetMask("Player", "Enemy", "Ignore Raycast");
+                if (!Physics.CheckSphere(potentialSpawn + Vector3.up * 1f, 0.4f, blockLayer))
+                {
+                    // 2. Ensure it's on a valid NavMesh
+                    UnityEngine.AI.NavMeshHit navHit;
+                    if (UnityEngine.AI.NavMesh.SamplePosition(potentialSpawn, out navHit, 2.0f, UnityEngine.AI.NavMesh.AllAreas))
+                    {
+                        // 3. Ensure the enemy can actually walk to the player (not stuck inside a closed room)
+                        UnityEngine.AI.NavMeshPath path = new UnityEngine.AI.NavMeshPath();
+                        if (UnityEngine.AI.NavMesh.CalculatePath(navHit.position, player.position, UnityEngine.AI.NavMesh.AllAreas, path))
+                        {
+                            if (path.status == UnityEngine.AI.NavMeshPathStatus.PathComplete)
+                            {
+                                return navHit.position; // Perfect spawn!
+                            }
+                        }
+                    }
+                }
+            }
         }
-        return spawnPos - Vector3.up * 4.5f; // Fallback
+
+        // Fallback: Spawn directly in front of the player if all attempts fail
+        return player.position + player.forward * 8f + Vector3.up * 0.5f;
     }
 
     public void RefreshEnemyCount()
@@ -107,7 +412,11 @@ public class GameManager : MonoBehaviour
         EnemyAI[] enemies = FindObjectsByType<EnemyAI>(FindObjectsSortMode.None);
         foreach (var e in enemies)
         {
-            if (e.gameObject.activeInHierarchy && e.gameObject != enemyPrefabTemplate) totalEnemies++;
+            // Do not count the template OR the safe copy
+            if (e.gameObject.activeInHierarchy && e.gameObject != enemyPrefabTemplate && !e.name.Contains("SafeCopy")) 
+            {
+                totalEnemies++;
+            }
         }
         Debug.Log("GameManager: Found " + totalEnemies + " active enemies.");
     }
@@ -117,67 +426,25 @@ public class GameManager : MonoBehaviour
         if (isGameOver) return;
         
         totalEnemies--;
+        totalKills++; // Increment score
+        if (totalEnemies < 0) totalEnemies = 0; // Prevent negative numbers
+        
         Debug.Log("Enemy Died! Remaining: " + totalEnemies);
         
-        if (totalEnemies <= 0)
+        if (totalEnemies == 0 && !levelTransitioning)
         {
-            Victory();
+            StartCoroutine(LevelCompleteRoutine());
         }
     }
 
     public void PlayerDied()
     {
         if (isGameOver) return;
-        GameOver();
-    }
-
-    void Victory()
-    {
-        // Victory is now maybe endless, or reached at Wave X
         isGameOver = true;
-        isVictory = true;
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
-    }
-
-    void GameOver()
-    {
-        isGameOver = true;
-        isVictory = false;
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-    }
-
-    void OnGUI()
-    {
-        if (!isGameOver)
-        {
-            GUIStyle waveStyle = new GUIStyle();
-            waveStyle.fontSize = 30;
-            waveStyle.normal.textColor = Color.white;
-            GUI.Label(new Rect(Screen.width / 2 - 50, 20, 200, 50), "WAVE " + currentWave, waveStyle);
-        }
-
-        if (isGameOver)
-        {
-            GUIStyle messageStyle = new GUIStyle();
-            messageStyle.alignment = TextAnchor.MiddleCenter;
-            messageStyle.fontSize = 70; // Made text bigger
-            messageStyle.normal.textColor = isVictory ? Color.green : Color.red;
-            
-            string message = isVictory ? "You are win" : "You are faild";
-            
-            float w = 600;
-            float h = 100;
-            GUI.Label(new Rect(Screen.width/2 - w/2, Screen.height/2 - 150, w, h), message, messageStyle);
-
-            GUIStyle buttonStyle = new GUIStyle(GUI.skin.button);
-            buttonStyle.fontSize = 40;
-            
-            if (GUI.Button(new Rect(Screen.width/2 - 150, Screen.height/2 + 20, 300, 80), "try again", buttonStyle))
-            {
-                 SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-            }
-        }
+        
+        // Stop the game world
+        Time.timeScale = 0f;
     }
 }
