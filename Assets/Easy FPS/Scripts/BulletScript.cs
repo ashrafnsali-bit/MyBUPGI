@@ -94,7 +94,8 @@ public class BulletScript : MonoBehaviour {
 					if (player != null) {
 						hasDealtDamage = true;
 						if (debugBullets) Debug.Log(gameObject.name + " (Enemy Bullet) HIT PLAYER: " + player.name);
-						player.TakeDamage(damage);
+						Vector3 sourcePos = owner != null ? owner.transform.position : transform.position;
+						player.TakeDamage(damage, sourcePos);
 						if (bloodEffect) Instantiate(bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
 						Destroy(gameObject);
 						return;

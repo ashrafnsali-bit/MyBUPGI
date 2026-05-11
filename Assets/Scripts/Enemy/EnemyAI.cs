@@ -1,8 +1,12 @@
 using UnityEngine;
 using UnityEngine.AI;
+public enum EnemyArchetype { Assaulter, Sniper, Rusher }
 
 public class EnemyAI : MonoBehaviour
 {
+    [Header("AI Archetype")]
+    public EnemyArchetype archetype = EnemyArchetype.Assaulter;
+
     [Header("Stats")]
     public float health = 100;
     private float maxHealth;
@@ -108,6 +112,8 @@ public class EnemyAI : MonoBehaviour
 
     void Start()
     {
+        ApplyArchetypeStats();
+
         // Try to get firePoint from WeaponSetup if available
         var weaponSetup = GetComponent<EnemyWeaponSetup>();
         if (weaponSetup != null && weaponSetup.firePoint != null) {
@@ -170,6 +176,30 @@ public class EnemyAI : MonoBehaviour
 
         // AUTO-HEIGHT FIX: Align model to ground if requested
         if (autoFixHeight) FixModelHeight();
+    }
+
+    private void ApplyArchetypeStats()
+    {
+        switch (archetype)
+        {
+            case EnemyArchetype.Sniper:
+                health *= 0.7f;
+                damage *= 2.5f;
+                attackRange = 30f;
+                sightRange = 70f;
+                fireRate = 0.5f; 
+                moveSpeed *= 0.8f;
+                dodgeChance = 0.1f;
+                break;
+            case EnemyArchetype.Rusher:
+                health *= 1.3f;
+                damage *= 0.8f;
+                attackRange = 5f;
+                moveSpeed *= 1.6f;
+                fireRate = 3.5f; 
+                dodgeChance = 0.7f;
+                break;
+        }
     }
 
     private void GenerateFallbackBullet()
@@ -322,12 +352,21 @@ public class EnemyAI : MonoBehaviour
         if (agent != null && agent.isOnNavMesh) {
             agent.updateRotation = false; // Disable NavMesh rotation to face player manually
             
+            // TACTICAL MOVEMENT (STRAFING / BACKING AWAY / DODGING)
+            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+
             // TACTICAL RETREAT
             float healthPct = health / maxHealth;
             isRetreating = (healthPct <= retreatHealthThreshold);
 
-            // TACTICAL MOVEMENT (STRAFING / BACKING AWAY / DODGING)
-            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+            if (archetype == EnemyArchetype.Sniper && distanceToPlayer < attackRange * 0.6f)
+            {
+                isRetreating = true;
+            }
+            if (archetype == EnemyArchetype.Rusher)
+            {
+                isRetreating = false; // Rushers never retreat
+            }
             
             // DODGE LOGIC: Sudden burst of speed to the side to dodge bullets
             if (Time.time >= nextDodgeTime && Random.value < (dodgeChance * Time.deltaTime)) {
@@ -496,7 +535,7 @@ public class EnemyAI : MonoBehaviour
                         var playerHealth = hit.transform.GetComponent<PlayerHealth>();
                         if (playerHealth == null) playerHealth = hit.transform.GetComponentInParent<PlayerHealth>();
                         
-                        if (playerHealth != null) playerHealth.TakeDamage(damage);
+                        if (playerHealth != null) playerHealth.TakeDamage(damage, transform.position);
                     }
                 }
             }
@@ -515,8 +554,16 @@ public class EnemyAI : MonoBehaviour
         // FLINCH MECHANIC: If taking heavy damage, stun briefly
         if (amount >= 15f && health > amount)
         {
-            flinchEndTime = Time.time + 0.2f; // Reduced from 0.6f so they don't freeze for too long
-            if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
+            flinchEndTime = Time.time + 0.4f; // Increased duration
+            if (agent != null && agent.isOnNavMesh) 
+            {
+                agent.isStopped = true;
+                if (player != null) {
+                    Vector3 knockbackDir = (transform.position - player.position).normalized;
+                    knockbackDir.y = 0;
+                    agent.Move(knockbackDir * 1.5f); // Physical Knockback
+                }
+            }
         }
         
         health -= amount;

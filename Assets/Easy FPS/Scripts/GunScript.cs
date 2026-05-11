@@ -96,7 +96,9 @@ public class GunScript : MonoBehaviour {
 
 		CrossHairExpansionWhenWalking();
 
-
+		if (UIManager.instance != null) {
+			UIManager.instance.UpdateAmmo((int)bulletsInTheGun, (int)bulletsIHave);
+		}
 	}
 
 	/*
@@ -549,6 +551,8 @@ public class GunScript : MonoBehaviour {
 	[Tooltip("HUD bullets to display bullet count on screen. Will be find under name 'HUD_bullets' in scene.")]
 	public TextMesh HUD_bullets;
 	void OnGUI(){
+		return;
+		/*
 		if(!HUD_bullets){
 			try{
 				HUD_bullets = GameObject.Find("HUD_bullets").GetComponent<TextMesh>();
@@ -561,6 +565,7 @@ public class GunScript : MonoBehaviour {
 			HUD_bullets.text = bulletsIHave.ToString() + " - " + bulletsInTheGun.ToString();
 
 		DrawCrosshair();
+		*/
 	}
 
 	[Header("Crosshair properties")]
@@ -570,10 +575,10 @@ public class GunScript : MonoBehaviour {
 	[HideInInspector]
 	public Vector2 expandValues_crosshair;
 	private float fadeout_value = 1;
-	/*
-	 * Drawing the crossHair.
-	 */
+
 	void DrawCrosshair(){
+		return;
+		/*
 		GUI.color = new Color(GUI.color.r, GUI.color.g, GUI.color.b, fadeout_value);
 		if(Input.GetAxis("Fire2") == 0){//if not aiming draw
 			GUI.DrawTexture(new Rect(vec2(left_pos_crosshair).x + position_x(-expandValues_crosshair.x) + Screen.width/2,Screen.height/2 + vec2(left_pos_crosshair).y, vec2(size_crosshair_horizontal).x, vec2(size_crosshair_horizontal).y), vertical_crosshair);//left
@@ -582,7 +587,7 @@ public class GunScript : MonoBehaviour {
 			GUI.DrawTexture(new Rect(vec2(top_pos_crosshair).x + Screen.width/2,Screen.height/2 + vec2(top_pos_crosshair).y + position_y(-expandValues_crosshair.y), vec2(size_crosshair_vertical).x, vec2(size_crosshair_vertical).y ), horizontal_crosshair);//top
 			GUI.DrawTexture(new Rect(vec2(bottom_pos_crosshair).x + Screen.width/2,Screen.height/2 +vec2(bottom_pos_crosshair).y + position_y(expandValues_crosshair.y), vec2(size_crosshair_vertical).x, vec2(size_crosshair_vertical).y), horizontal_crosshair);//bottom
 		}
-
+		*/
 	}
 
 	//#####		RETURN THE SIZE AND POSITION for GUI images ##################

@@ -9,7 +9,16 @@ public class PlayerHealth : MonoBehaviour
     public AudioClip hitSound;
     public AudioClip deathSound;
     private bool isDead = false;
-    
+    void Awake()
+    {
+        // Auto-create UIManager if it doesn't exist
+        if (FindFirstObjectByType<UIManager>() == null)
+        {
+            GameObject uiObj = new GameObject("UIManager");
+            uiObj.AddComponent<UIManager>();
+        }
+    }
+
     void Start()
     {
         currentHealth = maxHealth;
@@ -32,7 +41,7 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
-    public void TakeDamage(float amount)
+    public void TakeDamage(float amount, Vector3 sourcePosition = default(Vector3))
     {
         if (isDead) return; 
         if (Time.time < lastDamageTime + damageCooldown) return; // Ignores damage if too soon
@@ -46,6 +55,9 @@ public class PlayerHealth : MonoBehaviour
         {
             UIManager.instance.UpdateHealth((int)currentHealth, (int)maxHealth);
             UIManager.instance.ShowDamageFlash();
+            if (sourcePosition != default(Vector3)) {
+                UIManager.instance.ShowDirectionalDamage(sourcePosition, transform);
+            }
         }
         if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.3f, 0.2f);
 #if UNITY_ANDROID || UNITY_IOS

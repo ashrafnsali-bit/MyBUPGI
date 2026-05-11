@@ -18,6 +18,14 @@ public class UIManager : MonoBehaviour
     private RectTransform hitMarkerRoot;
     private Image[] hitMarkerLines = new Image[4];
     
+    // Directional Damage
+    private RectTransform damageDirRoot;
+    private Image damageDirImage;
+    private float damageDirTimer = 0f;
+    private float damageDirMaxTime = 2f;
+    private Transform playerTransform;
+    private Vector3 damageSourcePos;
+
     private float hitMarkerTimer = 0f;
     private float hitMarkerMaxTime = 0.3f;
     private float damageFlashTimer = 0f;
@@ -25,6 +33,8 @@ public class UIManager : MonoBehaviour
     
     private float targetHealthPct = 1f;
     private float currentHealthPct = 1f;
+    private float trailHealthPct = 1f;
+    private RectTransform healthBarTrailFill;
 
     void Awake()
     {
@@ -33,6 +43,10 @@ public class UIManager : MonoBehaviour
         else if (instance != this)
             Destroy(gameObject);
             
+        // Hide old legacy UI elements that overlap with our new UI
+        GameObject oldHUD = GameObject.Find("HUD_bullets");
+        if (oldHUD != null) oldHUD.SetActive(false);
+
         SetupUI();
     }
 
@@ -96,6 +110,25 @@ public class UIManager : MonoBehaviour
             hitMarkerLines[i] = lineImg;
         }
 
+        // 4.5 Directional Damage Indicator
+        GameObject dDirRootObj = new GameObject("DamageDirectionRoot");
+        dDirRootObj.transform.SetParent(canvasObj.transform, false);
+        damageDirRoot = dDirRootObj.AddComponent<RectTransform>();
+        damageDirRoot.anchorMin = new Vector2(0.5f, 0.5f);
+        damageDirRoot.anchorMax = new Vector2(0.5f, 0.5f);
+        damageDirRoot.sizeDelta = new Vector2(300, 300); // Orbit radius around center
+        
+        GameObject dDirImgObj = new GameObject("DamageDirectionImage");
+        dDirImgObj.transform.SetParent(dDirRootObj.transform, false);
+        damageDirImage = dDirImgObj.AddComponent<Image>();
+        damageDirImage.color = new Color(1, 0, 0, 0); // Transparent initially
+        RectTransform ddRt = dDirImgObj.GetComponent<RectTransform>();
+        ddRt.anchorMin = new Vector2(0.5f, 1f);
+        ddRt.anchorMax = new Vector2(0.5f, 1f);
+        ddRt.pivot = new Vector2(0.5f, 0f);
+        ddRt.anchoredPosition = new Vector2(0, 100); // Push out from center
+        ddRt.sizeDelta = new Vector2(120, 25);
+
         // 5. Health UI
         // Background
         GameObject hpBgObj = new GameObject("HealthPanelBG");
@@ -138,6 +171,18 @@ public class UIManager : MonoBehaviour
         tRt.anchoredPosition = new Vector2(0, 10);
         tRt.sizeDelta = new Vector2(-20, 15); // Padding
         
+        // Health Bar Trail (Yellow/White that shrinks slower)
+        GameObject trailObj = new GameObject("HealthBarTrail");
+        trailObj.transform.SetParent(trackObj.transform, false);
+        Image trailImg = trailObj.AddComponent<Image>();
+        trailImg.color = new Color(1f, 0.9f, 0.2f, 1f); // Yellow trail
+        healthBarTrailFill = trailObj.GetComponent<RectTransform>();
+        healthBarTrailFill.anchorMin = new Vector2(0, 0);
+        healthBarTrailFill.anchorMax = new Vector2(1, 1);
+        healthBarTrailFill.pivot = new Vector2(0, 0.5f);
+        healthBarTrailFill.offsetMin = Vector2.zero;
+        healthBarTrailFill.offsetMax = Vector2.zero;
+
         // Health Bar Fill
         GameObject fillObj = new GameObject("HealthBarFill");
         fillObj.transform.SetParent(trackObj.transform, false);
@@ -268,13 +313,66 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    public void ShowDirectionalDamage(Vector3 sourcePos, Transform pTransform)
+    {
+        damageDirTimer = damageDirMaxTime;
+        damageSourcePos = sourcePos;
+        playerTransform = pTransform;
+        
+        if (damageDirImage != null)
+        {
+            damageDirImage.color = new Color(1f, 0f, 0f, 0.8f); // Bright red
+        }
+    }
+
     void Update()
     {
         // 1. Smooth Health Bar Interpolation
         if (healthBarFill != null)
         {
-            currentHealthPct = Mathf.Lerp(currentHealthPct, targetHealthPct, Time.deltaTime * 5f);
+            currentHealthPct = Mathf.Lerp(currentHealthPct, targetHealthPct, Time.deltaTime * 10f);
             healthBarFill.anchorMax = new Vector2(currentHealthPct, 1);
+
+            // Trail shrinks slower
+            if (healthBarTrailFill != null)
+            {
+                if (trailHealthPct > targetHealthPct) {
+                    trailHealthPct = Mathf.Lerp(trailHealthPct, targetHealthPct, Time.deltaTime * 2f);
+                } else {
+                    trailHealthPct = targetHealthPct; // Instantly catch up if healing
+                }
+                healthBarTrailFill.anchorMax = new Vector2(trailHealthPct, 1);
+            }
+        }
+
+        // 1.5 Directional Damage Indicator Logic
+        if (damageDirTimer > 0 && playerTransform != null)
+        {
+            damageDirTimer -= Time.deltaTime;
+            
+            // Calculate relative angle
+            Vector3 dirToDamage = (damageSourcePos - playerTransform.position).normalized;
+            dirToDamage.y = 0; // Flat plane
+            
+            Vector3 playerForward = playerTransform.forward;
+            playerForward.y = 0;
+            playerForward.Normalize();
+            
+            float angle = Vector3.SignedAngle(playerForward, dirToDamage, Vector3.up);
+            
+            // Rotate the root to point to the damage (UI Z axis rotation is negative for clockwise)
+            if (damageDirRoot != null)
+            {
+                damageDirRoot.localRotation = Quaternion.Euler(0, 0, -angle);
+            }
+            
+            // Fade out
+            if (damageDirImage != null)
+            {
+                Color c = damageDirImage.color;
+                c.a = Mathf.Lerp(0, 0.8f, damageDirTimer / damageDirMaxTime);
+                damageDirImage.color = c;
+            }
         }
 
         // 2. Hit Marker Animation
