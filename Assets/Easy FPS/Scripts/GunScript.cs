@@ -11,6 +11,8 @@ public class GunScript : MonoBehaviour {
 	[HideInInspector]
 	public MouseLookScript mls;
 
+    private bool wasFiringMobile = false;
+
 	[Header("Player movement properties")]
 	[Tooltip("Speed is determined via gun because not every gun has same properties or weights so you MUST set up your speeds here")]
 	public int walkingSpeed = 2;
@@ -351,16 +353,17 @@ public class GunScript : MonoBehaviour {
 
 		if (!meeleAttack) {
 			if (currentStyle == GunStyles.nonautomatic) {
-				if (Input.GetButtonDown ("Fire1")) {
+				if (Input.GetButtonDown ("Fire1") || (UIManager.MobileIsFiring && !wasFiringMobile)) {
 					ShootMethod ();
 				}
 			}
 			if (currentStyle == GunStyles.automatic) {
-				if (Input.GetButton ("Fire1")) {
+				if (Input.GetButton ("Fire1") || UIManager.MobileIsFiring) {
 					ShootMethod ();
 				}
 			}
 		}
+        wasFiringMobile = UIManager.MobileIsFiring;
 		waitTillNextFire -= roundsPerSecond * Time.deltaTime;
 	}
 
@@ -625,7 +628,17 @@ public class GunScript : MonoBehaviour {
 			handsAnimator.SetFloat("walkSpeed",pmS.currentSpeed);
 			handsAnimator.SetBool("aiming", Input.GetButton("Fire2"));
 			handsAnimator.SetInteger("maxSpeed", pmS.maxSpeed);
-			if(Input.GetKeyDown(KeyCode.R) && pmS.maxSpeed < 5 && !reloading && !meeleAttack/* && !aiming*/){
+
+            bool reloadInput = Input.GetKeyDown(KeyCode.R);
+#if UNITY_ANDROID || UNITY_IOS
+            if (UIManager.MobileReloadPressed)
+            {
+                reloadInput = true;
+                UIManager.MobileReloadPressed = false;
+            }
+#endif
+
+			if(reloadInput && pmS.maxSpeed < 5 && !reloading && !meeleAttack/* && !aiming*/){
 				StartCoroutine("Reload_Animation");
 			}
 		}

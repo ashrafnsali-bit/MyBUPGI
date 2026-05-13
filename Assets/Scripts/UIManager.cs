@@ -1,10 +1,16 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using System.Collections;
 
 public class UIManager : MonoBehaviour
 {
     public static UIManager instance;
+
+    // Mobile Input Flags
+    public static bool MobileIsFiring = false;
+    public static bool MobileJumpPressed = false;
+    public static bool MobileReloadPressed = false;
 
     private Canvas canvas;
     private Text healthText;
@@ -52,6 +58,14 @@ public class UIManager : MonoBehaviour
 
     void SetupUI()
     {
+        // Ensure EventSystem exists for UI interactions
+        if (FindObjectOfType<EventSystem>() == null)
+        {
+            GameObject eventSystem = new GameObject("EventSystem");
+            eventSystem.AddComponent<EventSystem>();
+            eventSystem.AddComponent<StandaloneInputModule>();
+        }
+
         // 1. Canvas Setup
         GameObject canvasObj = new GameObject("ModernCanvasUI");
         canvas = canvasObj.AddComponent<Canvas>();
@@ -62,19 +76,25 @@ public class UIManager : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
         scaler.matchWidthOrHeight = 0.5f;
+
         canvasObj.AddComponent<GraphicRaycaster>();
 
-        // 2. Damage Overlay (Blood Screen)
-        GameObject dmgObj = new GameObject("DamageOverlay");
-        dmgObj.transform.SetParent(canvasObj.transform, false);
-        damageOverlay = dmgObj.AddComponent<Image>();
-        damageOverlay.color = new Color(0.8f, 0, 0, 0); // Transparent dark red
-        RectTransform dmgRt = dmgObj.GetComponent<RectTransform>();
-        dmgRt.anchorMin = Vector2.zero;
-        dmgRt.anchorMax = Vector2.one;
-        dmgRt.offsetMin = Vector2.zero;
-        dmgRt.offsetMax = Vector2.zero;
-        
+        // 1.5 Damage Vignette
+        GameObject vignetteObj = new GameObject("DamageVignette");
+        vignetteObj.transform.SetParent(canvasObj.transform, false);
+        RectTransform vRt = vignetteObj.AddComponent<RectTransform>();
+        vRt.anchorMin = Vector2.zero;
+        vRt.anchorMax = Vector2.one;
+        vRt.sizeDelta = Vector2.zero;
+        damageOverlay = vignetteObj.AddComponent<Image>();
+        damageOverlay.color = new Color(1, 0, 0, 0); // Transparent red
+        damageOverlay.raycastTarget = false;
+
+        // 1.6 Mobile Touch Controls (Only active on Mobile)
+#if UNITY_ANDROID || UNITY_IOS
+        SetupMobileControls(canvasObj.transform);
+#endif
+
         // 3. Crosshair (Center Dot)
         GameObject crosshairObj = new GameObject("Crosshair");
         crosshairObj.transform.SetParent(canvasObj.transform, false);
@@ -266,10 +286,6 @@ public class UIManager : MonoBehaviour
         if (healthBarFill != null)
         {
             targetHealthPct = Mathf.Clamp01((float)health / maxHealth);
-            // Change color immediately based on target
-            if (targetHealthPct <= 0.3f) healthBarImage.color = new Color(0.8f, 0.1f, 0.1f, 1f); // Red
-            else if (targetHealthPct <= 0.6f) healthBarImage.color = new Color(0.8f, 0.8f, 0.1f, 1f); // Yellow
-            else healthBarImage.color = new Color(0.2f, 0.8f, 0.2f, 1f); // Green
         }
     }
 
@@ -307,10 +323,6 @@ public class UIManager : MonoBehaviour
     public void ShowDamageFlash()
     {
         damageFlashTimer = damageFlashMaxTime;
-        if (damageOverlay != null)
-        {
-            damageOverlay.color = new Color(0.8f, 0f, 0f, 0.5f); // Flash intensity
-        }
     }
 
     public void ShowDirectionalDamage(Vector3 sourcePos, Transform pTransform)
@@ -327,25 +339,54 @@ public class UIManager : MonoBehaviour
 
     void Update()
     {
-        // 1. Smooth Health Bar Interpolation
+        // 1. Smoothly update health bar fill
         if (healthBarFill != null)
         {
-            currentHealthPct = Mathf.Lerp(currentHealthPct, targetHealthPct, Time.deltaTime * 10f);
+            currentHealthPct = Mathf.Lerp(currentHealthPct, targetHealthPct, Time.deltaTime * 5f);
             healthBarFill.anchorMax = new Vector2(currentHealthPct, 1);
+            
+            // Health color goes from Green -> Yellow -> Red
+            healthBarImage.color = Color.Lerp(Color.red, Color.green, currentHealthPct);
+        }
 
-            // Trail shrinks slower
-            if (healthBarTrailFill != null)
+        // Health Bar Trail (Yellow/White that shrinks slower)
+        if (healthBarTrailFill != null)
+        {
+            if (trailHealthPct > targetHealthPct)
             {
-                if (trailHealthPct > targetHealthPct) {
-                    trailHealthPct = Mathf.Lerp(trailHealthPct, targetHealthPct, Time.deltaTime * 2f);
-                } else {
-                    trailHealthPct = targetHealthPct; // Instantly catch up if healing
-                }
-                healthBarTrailFill.anchorMax = new Vector2(trailHealthPct, 1);
+                // Shrink slowly
+                trailHealthPct = Mathf.Lerp(trailHealthPct, targetHealthPct, Time.deltaTime * 2f);
+            }
+            else
+            {
+                // Snap if health goes up
+                trailHealthPct = targetHealthPct;
+            }
+            healthBarTrailFill.anchorMax = new Vector2(trailHealthPct, 1);
+        }
+
+        // 5. Damage Vignette Pulse
+        if (damageOverlay != null)
+        {
+            if (currentHealthPct <= 0.3f && currentHealthPct > 0)
+            {
+                // Pulse strongly when low health
+                float pulse = Mathf.PingPong(Time.time * 3f, 0.3f) + 0.1f;
+                damageOverlay.color = new Color(1, 0, 0, pulse);
+            }
+            else if (damageFlashTimer > 0)
+            {
+                damageFlashTimer -= Time.deltaTime;
+                float alpha = (damageFlashTimer / damageFlashMaxTime) * 0.4f;
+                damageOverlay.color = new Color(1, 0, 0, alpha);
+            }
+            else
+            {
+                damageOverlay.color = new Color(1, 0, 0, 0);
             }
         }
 
-        // 1.5 Directional Damage Indicator Logic
+        // 2. Hit Marker Animational Damage Indicator Logic
         if (damageDirTimer > 0 && playerTransform != null)
         {
             damageDirTimer -= Time.deltaTime;
@@ -408,5 +449,60 @@ public class UIManager : MonoBehaviour
                 damageOverlay.color = c;
             }
         }
+    }
+
+    private void SetupMobileControls(Transform parent)
+    {
+        // Fire Button
+        GameObject fireBtn = CreateMobileButton(parent, "FireBtn", new Vector2(-250, 250), 200, new Color(1, 0.2f, 0.2f, 0.4f), "FIRE");
+        EventTrigger fireTrig = fireBtn.AddComponent<EventTrigger>();
+        EventTrigger.Entry downEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        downEntry.callback.AddListener((data) => { MobileIsFiring = true; });
+        fireTrig.triggers.Add(downEntry);
+        EventTrigger.Entry upEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
+        upEntry.callback.AddListener((data) => { MobileIsFiring = false; });
+        fireTrig.triggers.Add(upEntry);
+
+        // Jump Button
+        GameObject jumpBtn = CreateMobileButton(parent, "JumpBtn", new Vector2(-200, 500), 120, new Color(0.8f, 0.8f, 1f, 0.4f), "JUMP");
+        Button jBtn = jumpBtn.AddComponent<Button>();
+        jBtn.onClick.AddListener(() => { MobileJumpPressed = true; });
+
+        // Reload Button
+        GameObject reloadBtn = CreateMobileButton(parent, "ReloadBtn", new Vector2(-480, 150), 120, new Color(1f, 0.8f, 0.2f, 0.4f), "RELOAD");
+        Button rBtn = reloadBtn.AddComponent<Button>();
+        rBtn.onClick.AddListener(() => { MobileReloadPressed = true; });
+    }
+
+    private GameObject CreateMobileButton(Transform parent, string name, Vector2 anchoredPos, float size, Color color, string text)
+    {
+        GameObject btnObj = new GameObject(name);
+        btnObj.transform.SetParent(parent, false);
+        RectTransform rt = btnObj.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1, 0); // Bottom Right
+        rt.anchorMax = new Vector2(1, 0);
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = new Vector2(size, size);
+        
+        Image img = btnObj.AddComponent<Image>();
+        img.color = color;
+        img.raycastTarget = true; // Important
+
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(btnObj.transform, false);
+        Text t = textObj.AddComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.text = text;
+        t.fontSize = (int)(size * 0.25f);
+        t.fontStyle = FontStyle.Bold;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = new Color(1, 1, 1, 0.8f);
+        t.raycastTarget = false;
+        
+        RectTransform trt = textObj.GetComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+        trt.sizeDelta = Vector2.zero;
+
+        return btnObj;
     }
 }

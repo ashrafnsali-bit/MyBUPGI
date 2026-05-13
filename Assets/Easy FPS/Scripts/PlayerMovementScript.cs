@@ -116,7 +116,16 @@ public class PlayerMovementScript : MonoBehaviour {
 	* Handles jumping and ads the force and sounds.
 	*/
 	void Jumping(){
-		if (Input.GetKeyDown (KeyCode.Space) && grounded) {
+		bool jumpInput = Input.GetKeyDown(KeyCode.Space);
+#if UNITY_ANDROID || UNITY_IOS
+        if (UIManager.MobileJumpPressed)
+        {
+            jumpInput = true;
+            UIManager.MobileJumpPressed = false; // Consume input
+        }
+#endif
+
+		if (jumpInput && grounded) {
 			// Using standard force to be safe with large values in the inspector
 			rb.AddRelativeForce (Vector3.up * jumpForce);
 			if (_jumpSound)
@@ -350,6 +359,9 @@ public class PlayerMovementScript : MonoBehaviour {
 			else
 				print ("Missing hit sound");
 			
+            if (UIManager.instance != null)
+                UIManager.instance.ShowHitMarker();
+
 			if (!swordHitWithGunOrNot) {
 				if (bloodEffect)
 					Instantiate (bloodEffect, _hitPos.point, Quaternion.identity);
