@@ -24,6 +24,9 @@ public class PlayerMovementScript : MonoBehaviour {
 		bulletSpawn = cameraMain.Find ("BulletSpawn").transform;
 		ignoreLayer = 1 << LayerMask.NameToLayer ("Player");
         
+        // Force high jump to clear walls
+        jumpForce = 450;
+        
         // Ensure the placeholder capsule mesh is hidden
         MeshRenderer mr = GetComponent<MeshRenderer>();
         if (mr != null) mr.enabled = false;
@@ -78,14 +81,6 @@ public class PlayerMovementScript : MonoBehaviour {
 			h = MobileJoystick.InputVector.x;
 			v = MobileJoystick.InputVector.y;
 		}
-		
-		// TOUCH TO MOVE FORWARD: If not using joystick, check for any touch on screen
-		if (Mathf.Abs(v) < 0.1f && Input.GetMouseButton(0)) {
-			// Ensure touch is NOT over UI (joystick, buttons, etc.)
-			if (UnityEngine.EventSystems.EventSystem.current == null || !UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) {
-				v = 1.0f; // Move forward
-			}
-		}
 		#endif
 
 		isMoving = Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f;
@@ -125,9 +120,12 @@ public class PlayerMovementScript : MonoBehaviour {
         }
 #endif
 
-		if (jumpInput && grounded) {
-			// Using standard force to be safe with large values in the inspector
-			rb.AddRelativeForce (Vector3.up * jumpForce);
+        bool actuallyGrounded = grounded || RayCastGrounded();
+
+		if (jumpInput && actuallyGrounded) {
+            // Set vertical velocity directly for a 100% reliable jump on any framerate/platform
+			rb.linearVelocity = new Vector3(rb.linearVelocity.x, 15f, rb.linearVelocity.z);
+			
 			if (_jumpSound)
 				_jumpSound.Play ();
 			else

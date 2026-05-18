@@ -91,6 +91,16 @@ public class PlayerGrenades : MonoBehaviour
 
     void Update()
     {
+#if UNITY_ANDROID || UNITY_IOS
+        if (UIManager.MobileGrenadePressed)
+        {
+            UIManager.MobileGrenadePressed = false;
+            if (grenadeCount > 0 && Time.timeScale > 0)
+            {
+                ThrowGrenade();
+            }
+        }
+#endif
         if (Input.GetKeyDown(KeyCode.G) && grenadeCount > 0 && Time.timeScale > 0)
         {
             ThrowGrenade();

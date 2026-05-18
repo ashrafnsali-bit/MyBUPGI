@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -79,6 +79,20 @@ public class GunInventory : MonoBehaviour {
 	 * gun properties value.
 	 */
 	void Create_Weapon(){
+
+#if UNITY_ANDROID || UNITY_IOS
+		if (UIManager.MobileSwitchWeaponPressed)
+		{
+			UIManager.MobileSwitchWeaponPressed = false;
+			switchWeaponCooldown = 0;
+			currentGunCounter++;
+			if(currentGunCounter > gunsIHave.Count-1){
+				currentGunCounter = 0;
+			}
+			StartCoroutine("Spawn",currentGunCounter);
+			return; // Don't process other inputs this frame
+		}
+#endif
 
 		/*
 		 * Scrolling wheel waepons changing

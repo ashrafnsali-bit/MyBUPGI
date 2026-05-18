@@ -40,7 +40,13 @@ public class BulletScript : MonoBehaviour {
 		
 		// Use a precise radius for environment and a thicker one for targets
 		float precisionRadius = 0.1f; 
-		float hitRange = 5.0f; // INCREASED: Check further ahead to avoid skipping targets
+		
+		float hitRange = 5.0f;
+		Rigidbody rb = GetComponent<Rigidbody>();
+		if (rb != null) {
+			// Ensure we check far enough ahead to cover the distance traveled this frame, plus a buffer
+			hitRange = Mathf.Max(hitRange, rb.linearVelocity.magnitude * Time.deltaTime * 1.5f);
+		}
 		
 		// HIT DETECTION: We check everything EXCEPT the ignoreLayer, 
 		// BUT we must ENSURE the Player and Enemy layers are NOT ignored if they are targets.

@@ -11,6 +11,8 @@ public class UIManager : MonoBehaviour
     public static bool MobileIsFiring = false;
     public static bool MobileJumpPressed = false;
     public static bool MobileReloadPressed = false;
+    public static bool MobileSwitchWeaponPressed = false;
+    public static bool MobileGrenadePressed = false;
 
     private Canvas canvas;
     private Text healthText;
@@ -49,6 +51,15 @@ public class UIManager : MonoBehaviour
         else if (instance != this)
             Destroy(gameObject);
             
+#if UNITY_ANDROID || UNITY_IOS
+        // Force Landscape orientation for mobile FPS to prevent layout squishing
+        Screen.autorotateToLandscapeLeft = true;
+        Screen.autorotateToLandscapeRight = true;
+        Screen.autorotateToPortrait = false;
+        Screen.autorotateToPortraitUpsideDown = false;
+        Screen.orientation = ScreenOrientation.AutoRotation;
+#endif
+
         // Hide old legacy UI elements that overlap with our new UI
         GameObject oldHUD = GameObject.Find("HUD_bullets");
         if (oldHUD != null) oldHUD.SetActive(false);
@@ -221,10 +232,10 @@ public class UIManager : MonoBehaviour
         Image ammoBgImg = ammoBgObj.AddComponent<Image>();
         ammoBgImg.color = new Color(0, 0, 0, 0.6f);
         RectTransform aBgRt = ammoBgObj.GetComponent<RectTransform>();
-        aBgRt.anchorMin = new Vector2(1, 0);
-        aBgRt.anchorMax = new Vector2(1, 0);
-        aBgRt.pivot = new Vector2(1, 0);
-        aBgRt.anchoredPosition = new Vector2(-50, 50);
+        aBgRt.anchorMin = new Vector2(1, 1); // Top Right
+        aBgRt.anchorMax = new Vector2(1, 1);
+        aBgRt.pivot = new Vector2(1, 1);
+        aBgRt.anchoredPosition = new Vector2(-50, -50);
         aBgRt.sizeDelta = new Vector2(250, 80);
 
         GameObject ammoObj = new GameObject("AmmoText");
@@ -249,10 +260,10 @@ public class UIManager : MonoBehaviour
         Image grenadeBgImg = grenadeBgObj.AddComponent<Image>();
         grenadeBgImg.color = new Color(0, 0, 0, 0.6f);
         RectTransform gBgRt = grenadeBgObj.GetComponent<RectTransform>();
-        gBgRt.anchorMin = new Vector2(1, 0);
-        gBgRt.anchorMax = new Vector2(1, 0);
-        gBgRt.pivot = new Vector2(1, 0);
-        gBgRt.anchoredPosition = new Vector2(-50, 140); // Above ammo
+        gBgRt.anchorMin = new Vector2(1, 1); // Top Right
+        gBgRt.anchorMax = new Vector2(1, 1);
+        gBgRt.pivot = new Vector2(1, 1);
+        gBgRt.anchoredPosition = new Vector2(-50, -140); // Below ammo
         gBgRt.sizeDelta = new Vector2(150, 60);
 
         GameObject grenadeObj = new GameObject("GrenadeText");
@@ -453,9 +464,44 @@ public class UIManager : MonoBehaviour
 
     private void SetupMobileControls(Transform parent)
     {
-        // Fire Button
-        GameObject fireBtn = CreateMobileButton(parent, "FireBtn", new Vector2(-250, 250), 200, new Color(1, 0.2f, 0.2f, 0.4f), "FIRE");
-        EventTrigger fireTrig = fireBtn.AddComponent<EventTrigger>();
+        // ----------------- Left Side: Joystick -----------------
+        GameObject joyBgObj = new GameObject("MobileJoystick");
+        joyBgObj.transform.SetParent(parent, false);
+        RectTransform joyBgRt = joyBgObj.AddComponent<RectTransform>();
+        joyBgRt.anchorMin = new Vector2(0, 0); // Bottom Left
+        joyBgRt.anchorMax = new Vector2(0, 0);
+        joyBgRt.anchoredPosition = new Vector2(350, 300); // Moved up/right slightly to clear HP
+        joyBgRt.sizeDelta = new Vector2(350, 350);
+        
+        Image joyBgImg = joyBgObj.AddComponent<Image>();
+        joyBgImg.color = new Color(0, 0, 0, 0.2f);
+        
+        GameObject joyHandleObj = new GameObject("Handle");
+        joyHandleObj.transform.SetParent(joyBgObj.transform, false);
+        RectTransform joyHandleRt = joyHandleObj.AddComponent<RectTransform>();
+        joyHandleRt.anchorMin = new Vector2(0.5f, 0.5f);
+        joyHandleRt.anchorMax = new Vector2(0.5f, 0.5f);
+        joyHandleRt.sizeDelta = new Vector2(150, 150);
+        
+        Image joyHandleImg = joyHandleObj.AddComponent<Image>();
+        joyHandleImg.color = new Color(1, 1, 1, 0.5f);
+        
+        joyBgObj.AddComponent<MobileJoystick>();
+
+        // ----------------- Right Side: Action Buttons -----------------
+        // Now that Ammo is top-right, we have the whole bottom-right corner.
+
+        // Vivid colors for the new 3D buttons
+        Color fireColor = new Color(0.9f, 0.15f, 0.15f, 0.85f);
+        Color jumpColor = new Color(0.15f, 0.6f, 1f, 0.85f);
+        Color reloadColor = new Color(1f, 0.6f, 0f, 0.85f);
+        Color bombColor = new Color(0.3f, 0.3f, 0.3f, 0.85f);
+        Color swapColor = new Color(0.2f, 0.8f, 0.2f, 0.85f);
+
+        // Fire Button (Large, main thumb resting position)
+        GameObject fireBtn = CreateMobileButton(parent, "FireBtn", new Vector2(-200, 200), 180, fireColor, "FIRE");
+        EventTrigger fireTrig = fireBtn.GetComponent<EventTrigger>();
+        if (fireTrig == null) fireTrig = fireBtn.AddComponent<EventTrigger>();
         EventTrigger.Entry downEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         downEntry.callback.AddListener((data) => { MobileIsFiring = true; });
         fireTrig.triggers.Add(downEntry);
@@ -463,19 +509,38 @@ public class UIManager : MonoBehaviour
         upEntry.callback.AddListener((data) => { MobileIsFiring = false; });
         fireTrig.triggers.Add(upEntry);
 
-        // Jump Button
-        GameObject jumpBtn = CreateMobileButton(parent, "JumpBtn", new Vector2(-200, 500), 120, new Color(0.8f, 0.8f, 1f, 0.4f), "JUMP");
-        Button jBtn = jumpBtn.AddComponent<Button>();
-        jBtn.onClick.AddListener(() => { MobileJumpPressed = true; });
+        // Jump Button (Directly above Fire)
+        GameObject jumpBtn = CreateMobileButton(parent, "JumpBtn", new Vector2(-200, 420), 120, jumpColor, "JUMP");
+        EventTrigger jumpTrig = jumpBtn.GetComponent<EventTrigger>();
+        EventTrigger.Entry jDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        jDown.callback.AddListener((data) => { MobileJumpPressed = true; });
+        jumpTrig.triggers.Add(jDown);
 
-        // Reload Button
-        GameObject reloadBtn = CreateMobileButton(parent, "ReloadBtn", new Vector2(-480, 150), 120, new Color(1f, 0.8f, 0.2f, 0.4f), "RELOAD");
-        Button rBtn = reloadBtn.AddComponent<Button>();
-        rBtn.onClick.AddListener(() => { MobileReloadPressed = true; });
+        // Reload Button (Left of Fire)
+        GameObject reloadBtn = CreateMobileButton(parent, "ReloadBtn", new Vector2(-420, 200), 120, reloadColor, "RELOAD");
+        EventTrigger reloadTrig = reloadBtn.GetComponent<EventTrigger>();
+        EventTrigger.Entry rDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        rDown.callback.AddListener((data) => { MobileReloadPressed = true; });
+        reloadTrig.triggers.Add(rDown);
+
+        // Grenade Button (Above Reload)
+        GameObject grenadeBtn = CreateMobileButton(parent, "GrenadeBtn", new Vector2(-420, 360), 120, bombColor, "BOMB");
+        EventTrigger bombTrig = grenadeBtn.GetComponent<EventTrigger>();
+        EventTrigger.Entry bDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        bDown.callback.AddListener((data) => { MobileGrenadePressed = true; });
+        bombTrig.triggers.Add(bDown);
+
+        // Swap Weapon Button (Above Jump)
+        GameObject swapBtn = CreateMobileButton(parent, "SwapBtn", new Vector2(-200, 580), 120, swapColor, "SWAP");
+        EventTrigger swapTrig = swapBtn.GetComponent<EventTrigger>();
+        EventTrigger.Entry sDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        sDown.callback.AddListener((data) => { MobileSwitchWeaponPressed = true; });
+        swapTrig.triggers.Add(sDown);
     }
 
     private GameObject CreateMobileButton(Transform parent, string name, Vector2 anchoredPos, float size, Color color, string text)
     {
+        // Root object (handles raycasts)
         GameObject btnObj = new GameObject(name);
         btnObj.transform.SetParent(parent, false);
         RectTransform rt = btnObj.AddComponent<RectTransform>();
@@ -484,24 +549,79 @@ public class UIManager : MonoBehaviour
         rt.anchoredPosition = anchoredPos;
         rt.sizeDelta = new Vector2(size, size);
         
-        Image img = btnObj.AddComponent<Image>();
-        img.color = color;
-        img.raycastTarget = true; // Important
+        // Base dark shadow/lip (simulates 3D depth)
+        GameObject lipObj = new GameObject("Lip");
+        lipObj.transform.SetParent(btnObj.transform, false);
+        RectTransform lipRt = lipObj.AddComponent<RectTransform>();
+        lipRt.anchorMin = Vector2.zero; lipRt.anchorMax = Vector2.one;
+        lipRt.offsetMin = new Vector2(0, -12); // Extends down
+        lipRt.offsetMax = Vector2.zero;
+        Image lipImg = lipObj.AddComponent<Image>();
+        lipImg.color = new Color(color.r * 0.4f, color.g * 0.4f, color.b * 0.4f, 1f); // Darker shade
+        
+        // Main button body
+        GameObject topObj = new GameObject("Top");
+        topObj.transform.SetParent(btnObj.transform, false);
+        RectTransform topRt = topObj.AddComponent<RectTransform>();
+        topRt.anchorMin = Vector2.zero; topRt.anchorMax = Vector2.one;
+        topRt.offsetMin = Vector2.zero; topRt.offsetMax = Vector2.zero;
+        Image topImg = topObj.AddComponent<Image>();
+        topImg.color = color;
+        
+        // Add glassy highlight (Top edge)
+        GameObject highlightObj = new GameObject("Highlight");
+        highlightObj.transform.SetParent(topObj.transform, false);
+        RectTransform highRt = highlightObj.AddComponent<RectTransform>();
+        highRt.anchorMin = new Vector2(0, 1); highRt.anchorMax = new Vector2(1, 1);
+        highRt.pivot = new Vector2(0.5f, 1f);
+        highRt.anchoredPosition = Vector2.zero;
+        highRt.sizeDelta = new Vector2(0, size * 0.15f); // 15% of height
+        Image highImg = highlightObj.AddComponent<Image>();
+        highImg.color = new Color(1, 1, 1, 0.3f);
 
+        // Text
         GameObject textObj = new GameObject("Text");
-        textObj.transform.SetParent(btnObj.transform, false);
+        textObj.transform.SetParent(topObj.transform, false);
         Text t = textObj.AddComponent<Text>();
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         t.text = text;
-        t.fontSize = (int)(size * 0.25f);
+        t.fontSize = (int)(size * 0.28f);
         t.fontStyle = FontStyle.Bold;
         t.alignment = TextAnchor.MiddleCenter;
-        t.color = new Color(1, 1, 1, 0.8f);
-        t.raycastTarget = false;
+        t.color = Color.white;
+        
+        // Text Shadow
+        Shadow txtShadow = textObj.AddComponent<Shadow>();
+        txtShadow.effectColor = new Color(0, 0, 0, 0.8f);
+        txtShadow.effectDistance = new Vector2(2, -2);
         
         RectTransform trt = textObj.GetComponent<RectTransform>();
         trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
         trt.sizeDelta = Vector2.zero;
+
+        // Interaction (Push down effect using EventTrigger)
+        EventTrigger trigger = btnObj.AddComponent<EventTrigger>();
+        
+        EventTrigger.Entry down = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        down.callback.AddListener((data) => { 
+            topRt.offsetMin = new Vector2(0, -8); 
+            topRt.offsetMax = new Vector2(0, -8); 
+            topImg.color = new Color(Mathf.Clamp01(color.r * 1.3f), Mathf.Clamp01(color.g * 1.3f), Mathf.Clamp01(color.b * 1.3f), color.a);
+        });
+        trigger.triggers.Add(down);
+        
+        EventTrigger.Entry up = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
+        up.callback.AddListener((data) => { 
+            topRt.offsetMin = Vector2.zero; 
+            topRt.offsetMax = Vector2.zero; 
+            topImg.color = color;
+        });
+        trigger.triggers.Add(up);
+
+        // Invisible Raycast Target on root
+        Image rootImg = btnObj.AddComponent<Image>();
+        rootImg.color = new Color(0,0,0,0);
+        rootImg.raycastTarget = true;
 
         return btnObj;
     }

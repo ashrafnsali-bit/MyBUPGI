@@ -10,13 +10,13 @@ public class EnemyAI : MonoBehaviour
     [Header("Stats")]
     public float health = 100;
     private float maxHealth;
-    public float damage = 10; // Increased to 10
-    public float sightRange = 50;
-    public float attackRange = 8;
-    public float attackHysteresis = 2f; // Buffer to prevent jittery state switching
-    public float moveSpeed = 5;
-    public float rotationSpeed = 10;
-    public float fireRate = 2.5f; // Shots per second. Changed from 0.4 to 2.5 for faster shooting
+    public float damage = 10;
+    public float sightRange = 200; // Spots player across the map
+    public float attackRange = 40; // Shoots from very far
+    public float attackHysteresis = 5f; // Buffer to prevent jittery state switching
+    public float moveSpeed = 10; // Runs extremely fast (Sprint)
+    public float rotationSpeed = 25; // Instant turning
+    public float fireRate = 8f; // Machine gun speed
     
     [Header("Natural Movement")]
     public float wanderRadius = 15f; 
@@ -26,10 +26,10 @@ public class EnemyAI : MonoBehaviour
 
     [Header("Tactical AI Options")]
     public bool enableHiveMind = true;
-    public float alertRadius = 30f;
-    public float retreatHealthThreshold = 0.3f; // 30% health
-    public float dodgeChance = 0.4f; // 40% chance to dodge
-    public float dodgeCooldown = 3f;
+    public float alertRadius = 80f; // Increased so one gunshot alerts the whole base
+    public float retreatHealthThreshold = 0.2f; // Retreat only when very low
+    public float dodgeChance = 0.6f; // 60% chance to dodge
+    public float dodgeCooldown = 1.5f; // Dodge more frequently
 
     [Header("References")]
     public Transform firePoint;
@@ -67,6 +67,8 @@ public class EnemyAI : MonoBehaviour
     private float flinchEndTime;
     private bool isRetreating = false;
     private bool hasAlertedOthers = false;
+    private Vector3 lastPlayerPos;
+    private Vector3 playerVelocity;
 
     void Awake()
     {
@@ -88,10 +90,10 @@ public class EnemyAI : MonoBehaviour
         
         // NAVIGATION TUNING: Snappier movement and better avoidance
         agent.speed = moveSpeed;
-        agent.angularSpeed = rotationSpeed * 40; // SIGNIFICANTLY INCREASED: For faster turning while chasing
-        agent.acceleration = moveSpeed * 3; // Snappier start/stop
-        agent.stoppingDistance = attackRange * 0.8f; // Stop slightly before the absolute range limit
-        agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance; // Prevent clumping
+        agent.angularSpeed = rotationSpeed * 50; 
+        agent.acceleration = moveSpeed * 4; // Instant acceleration
+        agent.stoppingDistance = attackRange * 0.2f; // CRITICAL: Get right in the player's face (Aggressive Rush)
+        agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
 
         // AUTO-SETUP: Weapon
         var weaponSetup = GetComponent<EnemyWeaponSetup>();
@@ -254,6 +256,12 @@ public class EnemyAI : MonoBehaviour
             return;
         }
 
+        // TRACK PLAYER VELOCITY FOR PREDICTIVE AIMING
+        if (Time.deltaTime > 0) {
+            playerVelocity = (player.position - lastPlayerPos) / Time.deltaTime;
+            lastPlayerPos = player.position;
+        }
+
         // FLINCH MECHANIC: Stun the enemy briefly
         if (Time.time < flinchEndTime)
         {
@@ -383,22 +391,28 @@ public class EnemyAI : MonoBehaviour
             
             if (Time.time >= nextStrafeTime)
             {
-                // Pick a new strafe point every 2-4 seconds
-                float strafeDirection = Random.value > 0.5f ? 1f : -1f;
-                Vector3 strafePos = transform.position + (transform.right * strafeDirection * 4f);
+                // SMART FLANKING / CIRCLE STRAFING
+                Vector3 dirToPlayer = (player.position - transform.position).normalized;
+                Vector3 rightDir = Vector3.Cross(dirToPlayer, Vector3.up).normalized;
                 
-                // If retreating, or player is too close, move backward
-                if (isRetreating || distanceToPlayer < attackRange * 0.5f) {
-                    strafePos -= transform.forward * 6f; // Move backwards
+                float strafeDirection = Random.value > 0.5f ? 1f : -1f;
+                // Move sideways relative to player
+                Vector3 strafePos = transform.position + (rightDir * strafeDirection * 6f);
+                
+                // Dynamic distance control - HYPER AGGRESSIVE
+                if (isRetreating) {
+                    strafePos -= dirToPlayer * 6f; // Back away if near death
+                } else if (distanceToPlayer > attackRange * 0.3f && archetype != EnemyArchetype.Sniper) {
+                    strafePos += dirToPlayer * 8f; // Push forward extremely aggressively
                 }
                 
                 NavMeshHit navHit;
-                if (UnityEngine.AI.NavMesh.SamplePosition(strafePos, out navHit, 3f, UnityEngine.AI.NavMesh.AllAreas))
+                if (UnityEngine.AI.NavMesh.SamplePosition(strafePos, out navHit, 4f, UnityEngine.AI.NavMesh.AllAreas))
                 {
                     strafeDestination = navHit.position;
                     if (agent != null && agent.isOnNavMesh) agent.SetDestination(strafeDestination);
                 }
-                nextStrafeTime = Time.time + Random.Range(1.0f, 2.5f); // Faster strafe updates
+                nextStrafeTime = Time.time + Random.Range(1.0f, 2.0f); // Faster strafe updates for dynamic movement
             }
             
             // Move towards strafe point if valid
@@ -449,11 +463,11 @@ public class EnemyAI : MonoBehaviour
                 lastFireTime = Time.time;
                 burstShotsFired++;
                 
-                // Reload/Take cover pause after 3-6 shots
-                if (burstShotsFired >= Random.Range(3, 7))
+                // Reload/Take cover pause after 8-15 shots (Extremely long bursts)
+                if (burstShotsFired >= Random.Range(8, 16))
                 {
                     isReloadingBurst = true;
-                    burstReloadTime = Time.time + Random.Range(0.4f, 0.8f); // Reduced from 1-2.5s for less waiting
+                    burstReloadTime = Time.time + Random.Range(0.1f, 0.3f); // Almost ZERO pause! Relentless pressure.
                 }
             }
         }
@@ -477,42 +491,47 @@ public class EnemyAI : MonoBehaviour
 
             if (bulletPrefab != null)
             {
-                // FORCE AIM: Calculate direction to player's center (approx 1.0m height)
+                // PREDICTIVE AIMING: Calculate where the player will be
                 Vector3 targetPos = player.position + Vector3.up * 1.3f;
-                Vector3 fireDirection = (targetPos - firePoint.position).normalized;
+                float dist = Vector3.Distance(firePoint.position, targetPos);
+                float timeToHit = dist / bulletSpeed;
                 
-                // AIM SPREAD: Add slight randomness so enemies miss sometimes
-                fireDirection.x += Random.Range(-0.08f, 0.08f);
-                fireDirection.y += Random.Range(-0.08f, 0.08f);
-                fireDirection.z += Random.Range(-0.08f, 0.08f);
+                Vector3 predictedPos = targetPos + (playerVelocity * timeToHit * 0.7f);
+                Vector3 fireDirection = (predictedPos - firePoint.position).normalized;
+                
+                // AIM SPREAD
+                fireDirection.x += Random.Range(-0.04f, 0.04f);
+                fireDirection.y += Random.Range(-0.04f, 0.04f);
+                fireDirection.z += Random.Range(-0.04f, 0.04f);
                 fireDirection.Normalize();
 
                 Quaternion fireRotation = Quaternion.LookRotation(fireDirection);
 
+                // 1. VISUAL BULLET (No Damage)
                 GameObject bullet = Instantiate(bulletPrefab, firePoint.position, fireRotation);
-                bullet.SetActive(true); // Ensure it's active if prefab was inactive
+                bullet.SetActive(true); 
                 Rigidbody rb = bullet.GetComponent<Rigidbody>();
                 if (rb != null) rb.linearVelocity = fireDirection * bulletSpeed;
                 
-                // IMPORTANT: Ignore collision between bullet and the enemy itself (Physics)
-                Collider enemyCollider = GetComponent<Collider>();
-                Collider bulletCollider = bullet.GetComponent<Collider>();
-                if (enemyCollider != null && bulletCollider != null)
-                {
-                    Physics.IgnoreCollision(enemyCollider, bulletCollider);
-                }
-
-                // Ensure the bullet does damage and HITS the player
                 BulletScript bs = bullet.GetComponent<BulletScript>();
                 if (bs != null) {
-                    bs.damage = damage;
+                    bs.damage = 0; // Disable physical damage, we rely entirely on Hitscan now!
                     bs.isEnemyBullet = true; 
-                    bs.owner = gameObject; // Assign Owner
-                    
-                    // TARGET REFINEMENT: Ensure bullet ignores other enemies physical layer to avoid "friendly walling"
-                    int enemyLayer = LayerMask.NameToLayer("Enemy");
-                    if (enemyLayer != -1) {
-                        bs.ignoreLayer |= (1 << enemyLayer);
+                    bs.owner = gameObject;
+                }
+
+                // 2. HITSCAN SYSTEM (100% Reliable Damage)
+                // Use a Raycast to instantly detect hits on the player
+                RaycastHit hit;
+                // Raycast past the player to ensure we hit them even if they move slightly
+                if (Physics.Raycast(firePoint.position, fireDirection, out hit, attackRange * 1.5f))
+                {
+                    if (hit.transform == player || hit.transform.IsChildOf(player))
+                    {
+                        PlayerHealth playerHealth = hit.transform.GetComponentInParent<PlayerHealth>();
+                        if (playerHealth != null) {
+                            playerHealth.TakeDamage(damage, transform.position);
+                        }
                     }
                 }
             }

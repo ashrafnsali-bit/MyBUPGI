@@ -22,6 +22,31 @@ public class Grenade : MonoBehaviour
             explosionEffect = barrel.explosionEffect;
             explosionSound = barrel.explosionSound;
         }
+
+        // CRITICAL FIX: If there are no explosive barrels in the scene, the bomb will have no sound!
+        // We must ensure there is always an explosion sound.
+        if (explosionSound == null)
+        {
+            // Search all loaded AudioClips for anything sounding like an explosion or shot
+            AudioClip[] allClips = Resources.FindObjectsOfTypeAll<AudioClip>();
+            foreach (AudioClip clip in allClips) {
+                if (clip.name.ToLower().Contains("expl")) {
+                    explosionSound = clip;
+                    break;
+                }
+            }
+            
+            // Fallback: If no explosion sound exists, use the Gun Shot sound! 
+            // When we pitch it down drastically, it will sound exactly like a heavy explosion.
+            if (explosionSound == null) {
+                foreach (AudioClip clip in allClips) {
+                    if (clip.name.ToLower().Contains("shot")) {
+                        explosionSound = clip;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     void Update()
@@ -38,9 +63,40 @@ public class Grenade : MonoBehaviour
         hasExploded = true;
 
         if (explosionEffect != null) Instantiate(explosionEffect, transform.position, transform.rotation);
-        if (explosionSound != null) AudioSource.PlayClipAtPoint(explosionSound, transform.position);
         
-        if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.6f, 0.5f);
+        if (explosionSound != null) {
+            // Create a devastating explosion sound effect by layering multiple 2D sounds
+            GameObject audioObj = new GameObject("MassiveExplosionAudio");
+            audioObj.transform.position = transform.position;
+            
+            // Layer 1: Core Boom (Fully 2D for max loudness in player's ears)
+            AudioSource src = audioObj.AddComponent<AudioSource>();
+            src.clip = explosionSound;
+            src.volume = 1.0f; 
+            src.spatialBlend = 0.0f; // 100% 2D - Ignores distance, MAXIMUM LOUDNESS
+            src.pitch = Random.Range(0.7f, 0.8f); 
+            src.Play();
+            
+            // Layer 2: Deep Bass Rumble
+            AudioSource src2 = audioObj.AddComponent<AudioSource>();
+            src2.clip = explosionSound;
+            src2.volume = 1.0f;
+            src2.spatialBlend = 0.0f;
+            src2.pitch = 0.4f; // Extreme low pitch for bass
+            src2.PlayDelayed(0.02f);
+            
+            // Layer 3: High Impact Crack
+            AudioSource src3 = audioObj.AddComponent<AudioSource>();
+            src3.clip = explosionSound;
+            src3.volume = 0.8f;
+            src3.spatialBlend = 0.0f;
+            src3.pitch = 1.2f; // High pitch for the initial explosive crack
+            src3.PlayDelayed(0.01f);
+
+            Destroy(audioObj, explosionSound.length + 1f);
+        }
+        
+        if (CameraShake.instance != null) CameraShake.instance.TriggerShake(1.5f, 1.0f); // Extreme screen shake
 
         // Keep track of hit objects to avoid doing multiple times damage to same entity (if it has multiple colliders)
         System.Collections.Generic.HashSet<GameObject> hitObjects = new System.Collections.Generic.HashSet<GameObject>();

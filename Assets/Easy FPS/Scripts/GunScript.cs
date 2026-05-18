@@ -441,13 +441,63 @@ public class GunScript : MonoBehaviour {
 
 				int randomNumberForMuzzelFlash = Random.Range(0,5);
 				if (bullet) {
-					GameObject bulletInstance = Instantiate (bullet, bulletSpawnPlace.transform.position, bulletSpawnPlace.transform.rotation);
+					// HITSCAN LOGIC (Instant 100% accuracy, fixes all distance/physics issues)
+					Vector3 targetPoint;
+					Ray ray = mainCamera.GetComponent<Camera>().ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+					RaycastHit hit;
+					
+					// Ignore Player and Weapon layers to prevent hitting our own colliders
+					int playerLayer = LayerMask.NameToLayer("Player");
+					int ignoreRaycastLayer = LayerMask.NameToLayer("Ignore Raycast");
+					LayerMask hitscanMask = ~0; // Everything
+					if (playerLayer != -1) hitscanMask &= ~(1 << playerLayer);
+					if (ignoreRaycastLayer != -1) hitscanMask &= ~(1 << ignoreRaycastLayer);
+
+					if (Physics.Raycast(ray, out hit, 2000f, hitscanMask, QueryTriggerInteraction.Ignore)) {
+						targetPoint = hit.point;
+						
+						// DEAL DAMAGE INSTANTLY
+						bool hitEnemy = false;
+						EnemyAI enemy = hit.transform.GetComponentInParent<EnemyAI>();
+						if (enemy != null) {
+							enemy.TakeDamage(damage);
+							hitEnemy = true;
+						} else if (hit.transform.tag == "Enemy" || hit.transform.tag == "Dummie" || hit.transform.tag == "ExplosiveBarrel") {
+							hit.transform.SendMessage("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
+							hitEnemy = true;
+						}
+
+						if (hitEnemy) {
+							// UI Feedback
+							if (UIManager.instance != null) UIManager.instance.ShowHitMarker();
+							GunScript.HitMarkerSound();
+							FloatingDamage.Create(hit.point, (int)damage);
+							
+							// Try to get Blood Effect from bullet prefab
+							BulletScript bsPrefab = bullet.GetComponent<BulletScript>();
+							if (bsPrefab != null && bsPrefab.bloodEffect != null && hit.transform.tag != "ExplosiveBarrel") {
+								Instantiate(bsPrefab.bloodEffect, hit.point, Quaternion.LookRotation(hit.normal));
+							}
+						}
+					} else {
+						targetPoint = ray.GetPoint(2000f); // Fallback far away
+					}
+					
+					// VISUAL BULLET (Spawns and flies for visual effect and wall decals only)
+					Vector3 aimDirection = (targetPoint - bulletSpawnPlace.transform.position).normalized;
+					Quaternion bulletRotation = Quaternion.LookRotation(aimDirection);
+
+					GameObject bulletInstance = Instantiate (bullet, bulletSpawnPlace.transform.position, bulletRotation);
 					Rigidbody rb = bulletInstance.GetComponent<Rigidbody>();
-					if (rb != null) rb.linearVelocity = bulletSpawnPlace.transform.forward * bulletSpeed;
+					if (rb != null) {
+						float actualSpeed = Mathf.Max(bulletSpeed, 600f);
+						rb.linearVelocity = aimDirection * actualSpeed;
+						rb.useGravity = false;
+					}
 					
 					BulletScript bs = bulletInstance.GetComponent<BulletScript>();
 					if (bs != null) {
-						bs.damage = damage;
+						bs.damage = 0; // Damage already dealt by hitscan! Prevent double damage.
 						bs.owner = player.gameObject;
 						bs.isEnemyBullet = false;
 					}
