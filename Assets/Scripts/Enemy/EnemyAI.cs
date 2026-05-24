@@ -14,8 +14,8 @@ public class EnemyAI : MonoBehaviour
     public float sightRange = 200; // Spots player across the map
     public float attackRange = 40; // Shoots from very far
     public float attackHysteresis = 5f; // Buffer to prevent jittery state switching
-    public float moveSpeed = 10; // Runs extremely fast (Sprint)
-    public float rotationSpeed = 25; // Instant turning
+    public float moveSpeed = 6.5f; // Realistic sprint speed (fixes animation foot-sliding)
+    public float rotationSpeed = 12; // Natural human turning speed
     public float fireRate = 8f; // Machine gun speed
     
     [Header("Natural Movement")]
@@ -51,6 +51,9 @@ public class EnemyAI : MonoBehaviour
 
     private NavMeshAgent agent;
     private Animator anim;
+    private Animation legacyAnim;
+    private string legacyIdle = "idle";
+    private string legacyRun = "run";
     private Transform player;
     private float lastFireTime;
     private float nextPathUpdateTime;
@@ -62,9 +65,9 @@ public class EnemyAI : MonoBehaviour
     private float burstReloadTime;
     private int burstShotsFired = 0;
     
-    // AI Tracking
     private float nextDodgeTime;
     private float flinchEndTime;
+    private float flinchCooldownTime; // Prevent stunlocking
     private bool isRetreating = false;
     private bool hasAlertedOthers = false;
     private Vector3 lastPlayerPos;
@@ -87,12 +90,32 @@ public class EnemyAI : MonoBehaviour
             }
         }
         if (anim == null && anims.Length > 0) anim = anims[0];
+
+        // FALLBACK: Legacy Animation
+        legacyAnim = GetComponentInChildren<Animation>();
+        if (legacyAnim != null && (anim == null || anim.runtimeAnimatorController == null)) {
+            useLegacyAnimation = true;
+            
+            // CRITICAL FIX FOR T-POSE: If Unity auto-added an empty Animator, it will BLOCK legacy animations and force a T-Pose.
+            // We must disable it!
+            if (anim != null) {
+                anim.enabled = false;
+                Debug.LogWarning("EnemyAI: Disabled empty Animator to allow Legacy Animation to play.");
+            }
+            
+            // Auto-detect clip names to fix case-sensitivity issues
+            foreach (AnimationState state in legacyAnim) {
+                string n = state.name.ToLower();
+                if (n.Contains("idle")) legacyIdle = state.name;
+                if (n.Contains("run") || n.Contains("walk")) legacyRun = state.name;
+            }
+        }
         
         // NAVIGATION TUNING: Snappier movement and better avoidance
         agent.speed = moveSpeed;
-        agent.angularSpeed = rotationSpeed * 50; 
-        agent.acceleration = moveSpeed * 4; // Instant acceleration
-        agent.stoppingDistance = attackRange * 0.2f; // CRITICAL: Get right in the player's face (Aggressive Rush)
+        agent.angularSpeed = rotationSpeed * 15; // Smoother turning, less robotic
+        agent.acceleration = moveSpeed * 1.5f; // Realistic human acceleration
+        agent.stoppingDistance = attackRange * 0.2f; 
         agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
 
         // AUTO-SETUP: Weapon
@@ -262,11 +285,11 @@ public class EnemyAI : MonoBehaviour
             lastPlayerPos = player.position;
         }
 
-        // FLINCH MECHANIC: Stun the enemy briefly
+        // FLINCH MECHANIC: Slow them down briefly but DO NOT stop them from shooting!
         if (Time.time < flinchEndTime)
         {
-            if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
-            return;
+            if (agent != null && agent.isOnNavMesh) agent.speed = moveSpeed * 0.2f; // Slow down instead of freezing
+            // We REMOVED the 'return;' here so they can still aim and shoot back even while taking damage!
         }
 
         float distance = Vector3.Distance(transform.position, player.position);
@@ -337,6 +360,7 @@ public class EnemyAI : MonoBehaviour
         {
             agent.isStopped = false;
             agent.speed = moveSpeed; // Restore full speed
+            agent.stoppingDistance = attackRange * 0.2f; // Stop at preferred distance
             agent.updateRotation = true; // Let NavMesh handle rotation during travel
 
             // PERFORMANCE: Throttle path updates
@@ -416,30 +440,31 @@ public class EnemyAI : MonoBehaviour
             }
             
             // Move towards strafe point if valid
-            if (strafeDestination != Vector3.zero && Vector3.Distance(transform.position, strafeDestination) > 0.5f) {
+            if (strafeDestination != Vector3.zero) {
+                agent.stoppingDistance = 0.5f; // MUST be small so they actually walk to the strafe point!
                 agent.isStopped = false;
-                // Move faster when retreating or dodging
-                float currentSpeed = isRetreating ? moveSpeed * 1.2f : moveSpeed * 0.7f;
-                if (Time.time < nextStrafeTime - 1.0f) currentSpeed = moveSpeed * 1.5f; // Dodge burst speed
+                
+                // REALISM: Humans walk slower when strafing sideways or backwards
+                float currentSpeed = moveSpeed * 0.65f; 
+                if (isRetreating) currentSpeed = moveSpeed * 0.8f; // Moving backwards quickly
                 agent.speed = currentSpeed; 
-            } else {
-                agent.isStopped = true;
             }
         }
         
-        // Face player (CRITICAL: doing this while moving creates strafing effect)
+        // Face player (SMOOTH ROTATION)
         Vector3 direction = (player.position - transform.position).normalized;
         direction.y = 0;
         if (direction != Vector3.zero)
         {
             Quaternion lookRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * rotationSpeed * 2.0f);
+            // Slerp with a fixed smooth speed instead of ultra-fast snapping
+            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 8.0f);
         }
 
         // Animation logic: show moving legs while aiming
         float moveVel = 0f;
         if (agent != null && !agent.isStopped) moveVel = agent.velocity.magnitude / moveSpeed;
-        SafeSetAnimFloat(speedParameter, Mathf.Lerp(anim.GetFloat(speedParameter), moveVel, Time.deltaTime * 5), 0.05f);
+        SafeSetAnimFloat(speedParameter, Mathf.Lerp(anim.GetFloat(speedParameter), moveVel, Time.deltaTime * 8f));
 
         // DEBUG: Visualize attack range
         Debug.DrawLine(transform.position, player.position, Color.red);
@@ -481,7 +506,8 @@ public class EnemyAI : MonoBehaviour
         
         if (muzzleFlash != null && firePoint != null)
         {
-            Instantiate(muzzleFlash, firePoint.position, firePoint.rotation);
+            GameObject flash = Instantiate(muzzleFlash, firePoint.position, firePoint.rotation);
+            Destroy(flash, 0.05f); // CRITICAL: Destroy instantly to prevent URP light limit crash!
         }
 
         if (firePoint != null)
@@ -570,23 +596,26 @@ public class EnemyAI : MonoBehaviour
         if (isDead) return;
         Debug.Log(">>> Enemy " + gameObject.name + " HIT! Damage: " + amount + " Health: " + health + " -> " + (health - amount));
         
-        // FLINCH MECHANIC: If taking heavy damage, stun briefly
-        if (amount >= 15f && health > amount)
+        // ANTI-STUNLOCK (FLINCH MECHANIC): Only flinch occasionally, never get stun-locked
+        if (amount >= 15f && health > amount && Time.time > flinchCooldownTime)
         {
-            flinchEndTime = Time.time + 0.4f; // Increased duration
+            flinchEndTime = Time.time + 0.2f; // Very brief flinch
+            flinchCooldownTime = Time.time + 2.0f; // Cannot flinch again for 2 seconds (forces them to fight back)
+            
             if (agent != null && agent.isOnNavMesh) 
             {
-                agent.isStopped = true;
                 if (player != null) {
                     Vector3 knockbackDir = (transform.position - player.position).normalized;
                     knockbackDir.y = 0;
-                    agent.Move(knockbackDir * 1.5f); // Physical Knockback
+                    agent.Move(knockbackDir * 0.5f); // Minor physical Knockback
                 }
             }
         }
         
         health -= amount;
-        SafeSetAnimTrigger(hitTrigger);
+        
+        // Play hit animation but don't interrupt shooting
+        if (Time.time > flinchCooldownTime - 1.8f) SafeSetAnimTrigger(hitTrigger);
         
         // Alert others if shot from afar
         if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
@@ -665,6 +694,18 @@ public class EnemyAI : MonoBehaviour
 
     private void SafeSetAnimFloat(string param, float value, float dampTime = 0f)
     {
+        if (useLegacyAnimation && legacyAnim != null)
+        {
+            if (param == speedParameter)
+            {
+                if (value > 0.1f)
+                    legacyAnim.CrossFade(legacyRun, 0.2f);
+                else
+                    legacyAnim.CrossFade(legacyIdle, 0.2f);
+            }
+            return;
+        }
+
         if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
         try { 
             if (dampTime > 0)
@@ -676,6 +717,8 @@ public class EnemyAI : MonoBehaviour
 
     private void SafeSetAnimTrigger(string param)
     {
+        if (useLegacyAnimation && legacyAnim != null) return; // Legacy doesn't use triggers
+
         if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
         try { anim.SetTrigger(param); } catch { }
     }

@@ -513,6 +513,7 @@ public class GunScript : MonoBehaviour {
 					print ("Missing the bullet prefab");
 				holdFlash = Instantiate(muzzelFlash[randomNumberForMuzzelFlash], muzzelSpawn.transform.position /*- muzzelPosition*/, muzzelSpawn.transform.rotation * Quaternion.Euler(0,0,90) ) as GameObject;
 				holdFlash.transform.parent = muzzelSpawn.transform;
+                Destroy(holdFlash, 0.05f); // CRITICAL: Destroy player's muzzle flash instantly to prevent URP light crash!
 				if (shoot_sound_source)
 					shoot_sound_source.Play ();
 				else
