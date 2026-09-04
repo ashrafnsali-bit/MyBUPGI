@@ -41,8 +41,13 @@ public class PlayerMovementScript : MonoBehaviour {
         defaultCameraLocalPos = cameraMain.localPosition;
         
         // Prevent player falling through ground over time
+        rb.isKinematic = false;
+        rb.constraints = RigidbodyConstraints.FreezeRotation;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+        // Auto-attach PlayerAbilities
+        if (GetComponent<PlayerAbilities>() == null) gameObject.AddComponent<PlayerAbilities>();
 	}
 	private Vector2 slowdownV;
 	private Vector2 horizontalMovement;
@@ -60,21 +65,17 @@ public class PlayerMovementScript : MonoBehaviour {
 	* If player leaves keys it will deaccelerate
 	*/
 	void PlayerMovementLogic(){
-		currentSpeed = rb.linearVelocity.magnitude;
-		horizontalMovement = new Vector2 (rb.linearVelocity.x, rb.linearVelocity.z);
-		if (horizontalMovement.magnitude > maxSpeed){
-			horizontalMovement = horizontalMovement.normalized;
-			horizontalMovement *= maxSpeed;    
-		}
-		rb.linearVelocity = new Vector3 (
-			horizontalMovement.x,
-			rb.linearVelocity.y,
-			horizontalMovement.y
-		);
-		bool isMoving = Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0;
+		float h = Input.GetAxisRaw("Horizontal");
+		float v = Input.GetAxisRaw("Vertical");
 
-		float h = Input.GetAxis ("Horizontal");
-		float v = Input.GetAxis ("Vertical");
+		// Direct WASD / Arrow Key fallback guarantee
+		if (h == 0 && v == 0)
+		{
+			if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) v += 1f;
+			if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) v -= 1f;
+			if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) h += 1f;
+			if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
+		}
 
 		#if UNITY_ANDROID || UNITY_IOS
 		if (Mathf.Abs(h) < 0.01f && Mathf.Abs(v) < 0.01f) {
@@ -83,29 +84,26 @@ public class PlayerMovementScript : MonoBehaviour {
 		}
 		#endif
 
-		isMoving = Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f;
+		bool isMoving = Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f;
 
-		bool actuallyGrounded = grounded || RayCastGrounded();
+		Vector3 moveDirection = transform.forward * v + transform.right * h;
+		moveDirection.y = 0;
+		if (moveDirection.sqrMagnitude > 1f) moveDirection.Normalize();
 
-		if (actuallyGrounded) {
-			if (!isMoving) {
-				Vector2 currentVel = new Vector2(rb.linearVelocity.x, rb.linearVelocity.z);
-				Vector2 newVel = Vector2.SmoothDamp(currentVel, Vector2.zero, ref slowdownV, deaccelerationSpeed);
-				rb.linearVelocity = new Vector3(newVel.x, rb.linearVelocity.y, newVel.y);
-			}
-			rb.AddRelativeForce (h * accelerationSpeed * Time.deltaTime, 0, v * accelerationSpeed * Time.deltaTime);
-		} else {
-			rb.AddRelativeForce (h * accelerationSpeed / 2 * Time.deltaTime, 0, v * accelerationSpeed / 2 * Time.deltaTime);
-		}
+		float targetSpeed = Input.GetKey(KeyCode.LeftShift) ? 11f : 7f; // Sprint vs Walk speed
+		Vector3 targetVelocity = moveDirection * targetSpeed;
 
-		/*
-		 * Slippery issues fixed here
-		 */
-		if (isMoving) {
-			deaccelerationSpeed = 0.5f;
-		} else {
-			deaccelerationSpeed = 0.1f;
-		}
+		Vector3 currentVel = rb.linearVelocity;
+		float lerpFactor = isMoving ? 18f : 25f;
+
+		Vector3 newVelocity = new Vector3(
+			Mathf.Lerp(currentVel.x, targetVelocity.x, lerpFactor * Time.fixedDeltaTime),
+			currentVel.y,
+			Mathf.Lerp(currentVel.z, targetVelocity.z, lerpFactor * Time.fixedDeltaTime)
+		);
+
+		rb.linearVelocity = newVelocity;
+		currentSpeed = new Vector2(rb.linearVelocity.x, rb.linearVelocity.z).magnitude;
 	}
 	/*
 	* Handles jumping and ads the force and sounds.
@@ -137,9 +135,9 @@ public class PlayerMovementScript : MonoBehaviour {
 	/*
 	* Update loop calling other stuff
 	*/
-	void Update(){
-        // Prevent falling infinitely
-        if (transform.position.y < -30f) {
+    void Update(){
+        // Prevent falling infinitely (only after initial load)
+        if (transform.position.y < -80f && Time.timeSinceLevelLoad > 2f) {
             PlayerHealth ph = GetComponent<PlayerHealth>();
             if (ph != null) ph.TakeDamage(9999);
         }

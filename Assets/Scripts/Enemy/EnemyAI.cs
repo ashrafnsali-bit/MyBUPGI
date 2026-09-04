@@ -1,6 +1,6 @@
 using UnityEngine;
 using UnityEngine.AI;
-public enum EnemyArchetype { Assaulter, Sniper, Rusher }
+public enum EnemyArchetype { Assaulter, Sniper, Rusher, Tank, Grenadier }
 
 public class EnemyAI : MonoBehaviour
 {
@@ -8,15 +8,15 @@ public class EnemyAI : MonoBehaviour
     public EnemyArchetype archetype = EnemyArchetype.Assaulter;
 
     [Header("Stats")]
-    public float health = 100;
+    public float health = 120;
     private float maxHealth;
-    public float damage = 10;
-    public float sightRange = 200; // Spots player across the map
-    public float attackRange = 40; // Shoots from very far
-    public float attackHysteresis = 5f; // Buffer to prevent jittery state switching
-    public float moveSpeed = 6.5f; // Realistic sprint speed (fixes animation foot-sliding)
-    public float rotationSpeed = 12; // Natural human turning speed
-    public float fireRate = 8f; // Machine gun speed
+    public float damage = 35; // Increased damage
+    public float sightRange = 500; // Very large sight range
+    public float attackRange = 80; // Start shooting much earlier
+    public float attackHysteresis = 15f;
+    public float moveSpeed = 13.0f; // Very fast
+    public float rotationSpeed = 25; // Snappier aim
+    public float fireRate = 20f; // Extremely fast machine gun speed
     
     [Header("Natural Movement")]
     public float wanderRadius = 15f; 
@@ -26,10 +26,10 @@ public class EnemyAI : MonoBehaviour
 
     [Header("Tactical AI Options")]
     public bool enableHiveMind = true;
-    public float alertRadius = 80f; // Increased so one gunshot alerts the whole base
-    public float retreatHealthThreshold = 0.2f; // Retreat only when very low
-    public float dodgeChance = 0.6f; // 60% chance to dodge
-    public float dodgeCooldown = 1.5f; // Dodge more frequently
+    public float alertRadius = 150f; // One gunshot alerts everyone
+    public float retreatHealthThreshold = 0.0f; // Never retreat!
+    public float dodgeChance = 0.2f; // Less dodging, more aggressive pushing
+    public float dodgeCooldown = 2.0f; // Dodge less frequently
 
     [Header("References")]
     public Transform firePoint;
@@ -73,6 +73,9 @@ public class EnemyAI : MonoBehaviour
     private Vector3 lastPlayerPos;
     private Vector3 playerVelocity;
 
+    private float nextGrenadeTime;
+    private GameObject enemyGrenadePrefab;
+
     void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
@@ -82,7 +85,6 @@ public class EnemyAI : MonoBehaviour
         Animator[] anims = GetComponentsInChildren<Animator>();
         foreach (var a in anims)
         {
-            // Prefer the animator that has an avatar (the actual 3D model) or a controller
             if (a.avatar != null || a.runtimeAnimatorController != null)
             {
                 anim = a;
@@ -95,15 +97,8 @@ public class EnemyAI : MonoBehaviour
         legacyAnim = GetComponentInChildren<Animation>();
         if (legacyAnim != null && (anim == null || anim.runtimeAnimatorController == null)) {
             useLegacyAnimation = true;
+            if (anim != null) anim.enabled = false;
             
-            // CRITICAL FIX FOR T-POSE: If Unity auto-added an empty Animator, it will BLOCK legacy animations and force a T-Pose.
-            // We must disable it!
-            if (anim != null) {
-                anim.enabled = false;
-                Debug.LogWarning("EnemyAI: Disabled empty Animator to allow Legacy Animation to play.");
-            }
-            
-            // Auto-detect clip names to fix case-sensitivity issues
             foreach (AnimationState state in legacyAnim) {
                 string n = state.name.ToLower();
                 if (n.Contains("idle")) legacyIdle = state.name;
@@ -111,39 +106,46 @@ public class EnemyAI : MonoBehaviour
             }
         }
         
-        // NAVIGATION TUNING: Snappier movement and better avoidance
-        agent.speed = moveSpeed;
-        agent.angularSpeed = rotationSpeed * 15; // Smoother turning, less robotic
-        agent.acceleration = moveSpeed * 1.5f; // Realistic human acceleration
-        agent.stoppingDistance = attackRange * 0.2f; 
-        agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
-
         // AUTO-SETUP: Weapon
         var weaponSetup = GetComponent<EnemyWeaponSetup>();
         if (weaponSetup == null) weaponSetup = gameObject.AddComponent<EnemyWeaponSetup>();
-        
-        // AUTO-SETUP: FirePoint (re-assign after weapon setup)
+
+        EnsureFirePoint();
+        EnforceAggressiveStats();
+        maxHealth = health;
+    }
+
+    void EnsureFirePoint()
+    {
         if (firePoint == null) {
-            // Wait for Start() to potentially set it up via WeaponSetup, or create fallback here.
-             GameObject fp = new GameObject("FirePoint_Auto");
-            fp.transform.SetParent(transform);
-            fp.transform.localPosition = new Vector3(0.2f, 1.5f, 1.0f); // Increased Z to 1.0f to avoid self-collision
-            fp.transform.localRotation = Quaternion.identity;
-            firePoint = fp.transform;
+            var weaponSetup = GetComponent<EnemyWeaponSetup>();
+            if (weaponSetup != null && weaponSetup.firePoint != null) {
+                firePoint = weaponSetup.firePoint;
+            }
         }
 
-        maxHealth = health; // Store max health for UI scaling
+        if (firePoint == null) {
+            Transform existingFp = transform.Find("FirePoint_Auto");
+            if (existingFp != null) {
+                firePoint = existingFp;
+            } else {
+                GameObject fp = new GameObject("FirePoint_Auto");
+                fp.transform.SetParent(transform);
+                fp.transform.localPosition = new Vector3(0.2f, 1.4f, 0.8f);
+                fp.transform.localRotation = Quaternion.identity;
+                firePoint = fp.transform;
+            }
+        }
     }
+
+    private float spawnTime;
 
     void Start()
     {
-        ApplyArchetypeStats();
-
-        // Try to get firePoint from WeaponSetup if available
-        var weaponSetup = GetComponent<EnemyWeaponSetup>();
-        if (weaponSetup != null && weaponSetup.firePoint != null) {
-            firePoint = weaponSetup.firePoint;
-        }
+        spawnTime = Time.time;
+        FindPlayer();
+        EnsureFirePoint();
+        EnforceAggressiveStats();
 
         // AUTO-SETUP: Bullet Prefab
         if (bulletPrefab == null)
@@ -151,7 +153,6 @@ public class EnemyAI : MonoBehaviour
             bulletPrefab = Resources.Load<GameObject>("Bullet");
             if (bulletPrefab == null)
             {
-                Debug.LogWarning("EnemyAI: Bullet Prefab is missing! Creating a fallback sphere.");
                 GenerateFallbackBullet();
             }
         }
@@ -170,20 +171,6 @@ public class EnemyAI : MonoBehaviour
             }
         }
 
-        // ROBUST PLAYER DETECTION
-        GameObject p = GameObject.FindGameObjectWithTag("Player");
-        if (p == null) {
-            var playerScript = FindFirstObjectByType<PlayerMovementScript>();
-            if (playerScript != null) p = playerScript.gameObject;
-        }
-        
-        if (p != null) {
-            player = p.transform;
-            Debug.Log("EnemyAI: Found player at " + player.position);
-        } else {
-            Debug.LogError("EnemyAI: Could not find player! Make sure player has 'Player' tag.");
-        }
-
         // RIGIDBODY CONFIG: For smoother NavMesh control
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null) {
@@ -191,7 +178,7 @@ public class EnemyAI : MonoBehaviour
             rb.useGravity = false;
         }
 
-        // NAVMESH SNAPPING: Ensure enemy is on valid floor on start
+        // NAVMESH SNAPPING
         if (agent != null) {
             NavMeshHit navHit;
             if (NavMesh.SamplePosition(transform.position, out navHit, 10.0f, NavMesh.AllAreas)) {
@@ -199,67 +186,111 @@ public class EnemyAI : MonoBehaviour
             }
         }
 
-        // AUTO-HEIGHT FIX: Align model to ground if requested
         if (autoFixHeight) FixModelHeight();
     }
 
-    private void ApplyArchetypeStats()
+    void FindPlayer()
     {
+        if (player != null) return;
+
+        GameObject p = GameObject.FindGameObjectWithTag("Player");
+        if (p == null) {
+            var playerScript = FindFirstObjectByType<PlayerMovementScript>();
+            if (playerScript != null) p = playerScript.gameObject;
+        }
+        if (p == null) {
+            var playerHealth = FindFirstObjectByType<PlayerHealth>();
+            if (playerHealth != null) p = playerHealth.gameObject;
+        }
+        
+        if (p != null) {
+            player = p.transform;
+        }
+    }
+
+    private void EnforceAggressiveStats()
+    {
+        // Casual, heroic combat stats (Player survives 150+ direct hits!)
+        health = Mathf.Max(health, 70f);
+        damage = Mathf.Clamp(damage, 2f, 5f); // 2-5 damage per bullet (Super survivable!)
+        sightRange = Mathf.Max(sightRange, 80f);
+        attackRange = Mathf.Max(attackRange, 30f);
+        moveSpeed = Mathf.Max(moveSpeed, 6.5f);
+        rotationSpeed = Mathf.Max(rotationSpeed, 10f);
+        fireRate = Mathf.Clamp(fireRate, 2.5f, 3.5f);
+        alertRadius = Mathf.Max(alertRadius, 70f);
+        retreatHealthThreshold = 0f;
+
         switch (archetype)
         {
             case EnemyArchetype.Sniper:
-                health *= 0.7f;
-                damage *= 2.5f;
-                attackRange = 30f;
-                sightRange = 70f;
-                fireRate = 0.5f; 
-                moveSpeed *= 0.8f;
-                dodgeChance = 0.1f;
+                damage = 8f;
+                attackRange = 50f;
+                fireRate = 1.0f; 
+                moveSpeed = 5.5f;
                 break;
             case EnemyArchetype.Rusher:
-                health *= 1.3f;
-                damage *= 0.8f;
-                attackRange = 5f;
-                moveSpeed *= 1.6f;
-                fireRate = 3.5f; 
-                dodgeChance = 0.7f;
+                health = 80f;
+                damage = 2f;
+                attackRange = 20f;
+                moveSpeed = 8.5f;
+                fireRate = 4f; 
                 break;
+            case EnemyArchetype.Tank:
+                health = 160f;
+                damage = 5f;
+                attackRange = 25f;
+                moveSpeed = 5.0f;
+                fireRate = 2.5f;
+                break;
+            case EnemyArchetype.Grenadier:
+                health = 75f;
+                damage = 3f;
+                moveSpeed = 6.0f;
+                fireRate = 3.0f;
+                break;
+            case EnemyArchetype.Assaulter:
+            default:
+                damage = 3f;
+                moveSpeed = 6.5f;
+                fireRate = 3.0f;
+                break;
+        }
+
+        if (agent != null)
+        {
+            agent.speed = moveSpeed;
+            agent.angularSpeed = 260f;
+            agent.acceleration = 18f;
+            agent.stoppingDistance = 3.0f;
+            agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
         }
     }
 
     private void GenerateFallbackBullet()
     {
-        // Create a simple sphere to act as a bullet
         bulletPrefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         bulletPrefab.name = "FallbackBullet";
-        bulletPrefab.transform.localScale = Vector3.one * 0.1f;
+        bulletPrefab.transform.localScale = Vector3.one * 0.15f;
         
-        // Add Rigidbody
         var rb = bulletPrefab.AddComponent<Rigidbody>();
-        rb.useGravity = false; // Bullets usually fly straight
+        rb.useGravity = false;
         
-        // Add BulletScript so it deals damage
         var bs = bulletPrefab.AddComponent<BulletScript>();
         bs.damage = damage;
-        bs.bloodEffect = null; // No effect for fallback
-        bs.decalHitWall = null;
 
-        // Make it red so it's visible
         var rend = bulletPrefab.GetComponent<Renderer>();
         if (rend != null) {
-            rend.material = new Material(Shader.Find("Sprites/Default")); // Self-illuminated
+            rend.material = new Material(Shader.Find("Sprites/Default"));
             rend.material.color = Color.red;
         }
 
-        // Add Trail Renderer for high visibility
         var trail = bulletPrefab.AddComponent<TrailRenderer>();
-        trail.startWidth = 0.1f;
+        trail.startWidth = 0.15f;
         trail.endWidth = 0.0f;
-        trail.time = 0.5f;
-        trail.material = rend.material;
+        trail.time = 0.4f;
+        if (rend != null) trail.material = rend.material;
 
-        // Hide it so the 'prefab' itself isn't floating in the scene
-        // We will activate copies when shooting
         bulletPrefab.SetActive(false);
     }
 
@@ -267,7 +298,6 @@ public class EnemyAI : MonoBehaviour
     {
         if (isDead) return;
         
-        // Kill enemy if they fall off the map
         if (transform.position.y < -50f) 
         {
             Die();
@@ -275,9 +305,14 @@ public class EnemyAI : MonoBehaviour
         }
         
         if (player == null) {
-            Debug.LogWarning("EnemyAI: Player is null! Enemy cannot move.");
-            return;
+            FindPlayer();
+            if (player == null) {
+                Wander();
+                return;
+            }
         }
+
+        EnsureFirePoint();
 
         // TRACK PLAYER VELOCITY FOR PREDICTIVE AIMING
         if (Time.deltaTime > 0) {
@@ -285,18 +320,10 @@ public class EnemyAI : MonoBehaviour
             lastPlayerPos = player.position;
         }
 
-        // FLINCH MECHANIC: Slow them down briefly but DO NOT stop them from shooting!
-        if (Time.time < flinchEndTime)
-        {
-            if (agent != null && agent.isOnNavMesh) agent.speed = moveSpeed * 0.2f; // Slow down instead of freezing
-            // We REMOVED the 'return;' here so they can still aim and shoot back even while taking damage!
-        }
-
         float distance = Vector3.Distance(transform.position, player.position);
-        
-        // HYSTERESIS LOGIC: Stay in attack state unless player moves significantly away
         float currentAttackRange = isCurrentlyAttacking ? (attackRange + attackHysteresis) : attackRange;
 
+        // Engage when within range
         if (distance <= currentAttackRange)
         {
             isCurrentlyAttacking = true;
@@ -305,18 +332,10 @@ public class EnemyAI : MonoBehaviour
         else
         {
             isCurrentlyAttacking = false;
-            if (distance <= sightRange)
-            {
-                Chase();
-            }
-            else
-            {
-                Wander();
-            }
+            Chase();
         }
         
-        // HIVE MIND ALERT: Alert others when we first spot the player
-        if ((isCurrentlyAttacking || distance <= sightRange) && !hasAlertedOthers && enableHiveMind)
+        if (!hasAlertedOthers && enableHiveMind)
         {
             AlertNearbyEnemies();
         }
@@ -325,9 +344,8 @@ public class EnemyAI : MonoBehaviour
     void Wander()
     {
         if (agent == null || !agent.isOnNavMesh) return;
-        agent.updateRotation = true; // Ensure they look where they are going when wandering
+        agent.updateRotation = true;
 
-        // If we reached the target or haven't started wandering, pick a new spot after waiting
         if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
         {
             if (isWandering) {
@@ -349,127 +367,68 @@ public class EnemyAI : MonoBehaviour
             }
         }
 
-        // Sync animation with wandering speed
         float speed = agent.velocity.magnitude / moveSpeed;
-        SafeSetAnimFloat(speedParameter, speed * 0.5f, 0.2f); // Walk slowly while wandering
+        SafeSetAnimFloat(speedParameter, speed * 0.5f, 0.2f);
     }
 
     void Chase()
     {
-        if (agent != null && agent.isOnNavMesh)
+        if (agent != null && agent.isOnNavMesh && player != null)
         {
             agent.isStopped = false;
-            agent.speed = moveSpeed; // Restore full speed
-            agent.stoppingDistance = attackRange * 0.2f; // Stop at preferred distance
-            agent.updateRotation = true; // Let NavMesh handle rotation during travel
+            agent.speed = moveSpeed;
+            agent.stoppingDistance = 2.5f;
+            agent.updateRotation = true;
 
-            // PERFORMANCE: Throttle path updates
             if (Time.time >= nextPathUpdateTime) {
                 agent.SetDestination(player.position);
-                nextPathUpdateTime = Time.time + 0.2f; // Update path every 0.2s
+                nextPathUpdateTime = Time.time + 0.15f;
             }
             
-            // CRITICAL FIX: Normalize speed to 0-1 for BlendTree
-            // BlendTree expects: 0 = idle, 0.5 = walk, 1.0 = run
-            float speed = agent.velocity.magnitude / moveSpeed; 
-            
-            // SMOOTHING: Avoid jittery animation changes
-            float currentAnimSpeed = anim.GetFloat(speedParameter);
-            SafeSetAnimFloat(speedParameter, Mathf.Lerp(currentAnimSpeed, speed, Time.deltaTime * 5));
+            float speed = agent.velocity.magnitude / Mathf.Max(moveSpeed, 1f); 
+            SafeSetAnimFloat(speedParameter, Mathf.Max(speed, 0.8f));
         }
     }
 
     void Attack()
     {
+        if (player == null) return;
+        if (Time.time < spawnTime + 0.8f) return; // 0.8s initial spawn reaction delay
+
         if (agent != null && agent.isOnNavMesh) {
-            agent.updateRotation = false; // Disable NavMesh rotation to face player manually
+            agent.updateRotation = false; // Turn manually to track player
             
-            // TACTICAL MOVEMENT (STRAFING / BACKING AWAY / DODGING)
             float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-            // TACTICAL RETREAT
-            float healthPct = health / maxHealth;
-            isRetreating = (healthPct <= retreatHealthThreshold);
-
-            if (archetype == EnemyArchetype.Sniper && distanceToPlayer < attackRange * 0.6f)
+            if (distanceToPlayer > 3.5f)
             {
-                isRetreating = true;
-            }
-            if (archetype == EnemyArchetype.Rusher)
-            {
-                isRetreating = false; // Rushers never retreat
-            }
-            
-            // DODGE LOGIC: Sudden burst of speed to the side to dodge bullets
-            if (Time.time >= nextDodgeTime && Random.value < (dodgeChance * Time.deltaTime)) {
-                float dodgeDir = Random.value > 0.5f ? 1f : -1f;
-                Vector3 dodgePos = transform.position + (transform.right * dodgeDir * 6f);
-                NavMeshHit navHit;
-                if (NavMesh.SamplePosition(dodgePos, out navHit, 4f, NavMesh.AllAreas)) {
-                    strafeDestination = navHit.position;
-                    if (agent != null && agent.isOnNavMesh) agent.SetDestination(strafeDestination);
-                    nextStrafeTime = Time.time + 1.5f; // Pause normal strafing
-                }
-                nextDodgeTime = Time.time + dodgeCooldown;
-            }
-            
-            if (Time.time >= nextStrafeTime)
-            {
-                // SMART FLANKING / CIRCLE STRAFING
-                Vector3 dirToPlayer = (player.position - transform.position).normalized;
-                Vector3 rightDir = Vector3.Cross(dirToPlayer, Vector3.up).normalized;
-                
-                float strafeDirection = Random.value > 0.5f ? 1f : -1f;
-                // Move sideways relative to player
-                Vector3 strafePos = transform.position + (rightDir * strafeDirection * 6f);
-                
-                // Dynamic distance control - HYPER AGGRESSIVE
-                if (isRetreating) {
-                    strafePos -= dirToPlayer * 6f; // Back away if near death
-                } else if (distanceToPlayer > attackRange * 0.3f && archetype != EnemyArchetype.Sniper) {
-                    strafePos += dirToPlayer * 8f; // Push forward extremely aggressively
-                }
-                
-                NavMeshHit navHit;
-                if (UnityEngine.AI.NavMesh.SamplePosition(strafePos, out navHit, 4f, UnityEngine.AI.NavMesh.AllAreas))
-                {
-                    strafeDestination = navHit.position;
-                    if (agent != null && agent.isOnNavMesh) agent.SetDestination(strafeDestination);
-                }
-                nextStrafeTime = Time.time + Random.Range(1.0f, 2.0f); // Faster strafe updates for dynamic movement
-            }
-            
-            // Move towards strafe point if valid
-            if (strafeDestination != Vector3.zero) {
-                agent.stoppingDistance = 0.5f; // MUST be small so they actually walk to the strafe point!
                 agent.isStopped = false;
-                
-                // REALISM: Humans walk slower when strafing sideways or backwards
-                float currentSpeed = moveSpeed * 0.65f; 
-                if (isRetreating) currentSpeed = moveSpeed * 0.8f; // Moving backwards quickly
-                agent.speed = currentSpeed; 
+                agent.speed = moveSpeed;
+                agent.stoppingDistance = 2.0f;
+                agent.SetDestination(player.position);
+            }
+            else
+            {
+                agent.isStopped = false;
+                agent.speed = moveSpeed * 0.5f;
             }
         }
         
-        // Face player (SMOOTH ROTATION)
+        // Aim at player
         Vector3 direction = (player.position - transform.position).normalized;
         direction.y = 0;
         if (direction != Vector3.zero)
         {
             Quaternion lookRotation = Quaternion.LookRotation(direction);
-            // Slerp with a fixed smooth speed instead of ultra-fast snapping
-            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 8.0f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 15.0f);
         }
 
-        // Animation logic: show moving legs while aiming
-        float moveVel = 0f;
-        if (agent != null && !agent.isStopped) moveVel = agent.velocity.magnitude / moveSpeed;
-        SafeSetAnimFloat(speedParameter, Mathf.Lerp(anim.GetFloat(speedParameter), moveVel, Time.deltaTime * 8f));
+        float moveVel = (agent != null && !agent.isStopped) ? (agent.velocity.magnitude / moveSpeed) : 0f;
+        SafeSetAnimFloat(speedParameter, Mathf.Max(moveVel, 0.5f));
 
-        // DEBUG: Visualize attack range
         Debug.DrawLine(transform.position, player.position, Color.red);
 
-        // TACTICAL SHOOTING (BURST FIRE)
+        // TACTICAL BURST FIRING
         if (isReloadingBurst)
         {
             if (Time.time >= burstReloadTime)
@@ -480,19 +439,26 @@ public class EnemyAI : MonoBehaviour
         }
         else
         {
-            // If fireRate is very low (e.g. 0.4 from old inspector values), we use a max to prevent 2.5s delays
             float actualFireDelay = 1f / Mathf.Max(fireRate, 2.0f);
             if (Time.time >= lastFireTime + actualFireDelay)
             {
-                Shoot();
-                lastFireTime = Time.time;
-                burstShotsFired++;
-                
-                // Reload/Take cover pause after 8-15 shots (Extremely long bursts)
-                if (burstShotsFired >= Random.Range(8, 16))
+                if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime && Random.value < 0.3f)
                 {
-                    isReloadingBurst = true;
-                    burstReloadTime = Time.time + Random.Range(0.1f, 0.3f); // Almost ZERO pause! Relentless pressure.
+                    ThrowGrenade();
+                    lastFireTime = Time.time;
+                    nextGrenadeTime = Time.time + Random.Range(6f, 10f);
+                }
+                else
+                {
+                    Shoot();
+                    lastFireTime = Time.time;
+                    burstShotsFired++;
+                    
+                    if (burstShotsFired >= Random.Range(2, 4))
+                    {
+                        isReloadingBurst = true;
+                        burstReloadTime = Time.time + Random.Range(2.5f, 4.0f); // 2.5s to 4.0s long reload breather
+                    }
                 }
             }
         }
@@ -500,94 +466,128 @@ public class EnemyAI : MonoBehaviour
 
     void Shoot()
     {
+        if (player == null) return;
+        EnsureFirePoint();
+
         SafeSetAnimTrigger(shootTrigger);
         
         if (shootSound != null) AudioSource.PlayClipAtPoint(shootSound, transform.position);
         
-        if (muzzleFlash != null && firePoint != null)
+        Vector3 spawnPos = (firePoint != null) ? firePoint.position : (transform.position + Vector3.up * 1.4f + transform.forward * 0.5f);
+        Quaternion spawnRot = (firePoint != null) ? firePoint.rotation : transform.rotation;
+
+        if (muzzleFlash != null)
         {
-            GameObject flash = Instantiate(muzzleFlash, firePoint.position, firePoint.rotation);
-            Destroy(flash, 0.05f); // CRITICAL: Destroy instantly to prevent URP light limit crash!
+            GameObject flash = Instantiate(muzzleFlash, spawnPos, spawnRot);
+            Destroy(flash, 0.05f);
         }
 
-        if (firePoint != null)
+        Vector3 targetPos = player.position + Vector3.up * 1.0f;
+        Vector3 baseDir = (targetPos - spawnPos).normalized;
+
+        // Controlled bullet spread so player can dodge with movement
+        Vector3 fireDirection = baseDir + new Vector3(Random.Range(-0.035f, 0.035f), Random.Range(-0.035f, 0.035f), Random.Range(-0.035f, 0.035f));
+        fireDirection.Normalize();
+
+        Quaternion fireRotation = Quaternion.LookRotation(fireDirection);
+
+        // 1. VISUAL BULLET
+        if (bulletPrefab != null)
         {
-            // DEBUG: Visualize fire direction
-            Debug.DrawRay(firePoint.position, firePoint.forward * 10, Color.green, 2.0f);
-
-            if (bulletPrefab != null)
-            {
-                // PREDICTIVE AIMING: Calculate where the player will be
-                Vector3 targetPos = player.position + Vector3.up * 1.3f;
-                float dist = Vector3.Distance(firePoint.position, targetPos);
-                float timeToHit = dist / bulletSpeed;
-                
-                Vector3 predictedPos = targetPos + (playerVelocity * timeToHit * 0.7f);
-                Vector3 fireDirection = (predictedPos - firePoint.position).normalized;
-                
-                // AIM SPREAD
-                fireDirection.x += Random.Range(-0.04f, 0.04f);
-                fireDirection.y += Random.Range(-0.04f, 0.04f);
-                fireDirection.z += Random.Range(-0.04f, 0.04f);
-                fireDirection.Normalize();
-
-                Quaternion fireRotation = Quaternion.LookRotation(fireDirection);
-
-                // 1. VISUAL BULLET (No Damage)
-                GameObject bullet = Instantiate(bulletPrefab, firePoint.position, fireRotation);
-                bullet.SetActive(true); 
-                Rigidbody rb = bullet.GetComponent<Rigidbody>();
-                if (rb != null) rb.linearVelocity = fireDirection * bulletSpeed;
-                
-                BulletScript bs = bullet.GetComponent<BulletScript>();
-                if (bs != null) {
-                    bs.damage = 0; // Disable physical damage, we rely entirely on Hitscan now!
-                    bs.isEnemyBullet = true; 
-                    bs.owner = gameObject;
-                }
-
-                // 2. HITSCAN SYSTEM (100% Reliable Damage)
-                // Use a Raycast to instantly detect hits on the player
-                RaycastHit hit;
-                // Raycast past the player to ensure we hit them even if they move slightly
-                if (Physics.Raycast(firePoint.position, fireDirection, out hit, attackRange * 1.5f))
-                {
-                    if (hit.transform == player || hit.transform.IsChildOf(player))
-                    {
-                        PlayerHealth playerHealth = hit.transform.GetComponentInParent<PlayerHealth>();
-                        if (playerHealth != null) {
-                            playerHealth.TakeDamage(damage, transform.position);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // FALLBACK RAYCAST
-                Debug.DrawLine(firePoint.position, player.position, Color.yellow, 0.1f);
-                RaycastHit hit;
-                Vector3 direction = (player.position - firePoint.position).normalized;
-                // Add spread
-                direction.x += Random.Range(-0.05f, 0.05f);
-                direction.y += Random.Range(-0.05f, 0.05f);
-                
-                // RaycastAll to pass through enemy triggers/colliders if needed, or just standard
-                if (Physics.Raycast(firePoint.position, direction, out hit, attackRange))
-                {
-                    if (hit.transform == player || hit.transform.root == player)
-                    {
-                        Debug.Log("EnemyAI: Fallback Raycast HIT PLAYER!");
-                        var playerHealth = hit.transform.GetComponent<PlayerHealth>();
-                        if (playerHealth == null) playerHealth = hit.transform.GetComponentInParent<PlayerHealth>();
-                        
-                        if (playerHealth != null) playerHealth.TakeDamage(damage, transform.position);
-                    }
-                }
+            GameObject bullet = Instantiate(bulletPrefab, spawnPos, fireRotation);
+            bullet.SetActive(true); 
+            Rigidbody rb = bullet.GetComponent<Rigidbody>();
+            if (rb != null) rb.linearVelocity = fireDirection * bulletSpeed;
+            
+            BulletScript bs = bullet.GetComponent<BulletScript>();
+            if (bs != null) {
+                bs.damage = 0; // Visual only to prevent duplicate damage
+                bs.isEnemyBullet = true; 
+                bs.owner = gameObject;
             }
         }
-        else
+
+        // 2. GUARANTEED DIRECT HITSCAN (Filtered Line of Sight)
+        Vector3 rayOrigin = transform.position + Vector3.up * 1.4f;
+        Vector3 toPlayer = (targetPos - rayOrigin);
+        float distToPlayer = toPlayer.magnitude;
+        Vector3 rayDir = toPlayer.normalized;
+
+        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, rayDir, distToPlayer, ~0, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        bool blockedByObstacle = false;
+        foreach (RaycastHit h in hits)
         {
-            Debug.LogError("EnemyAI: FirePoint is NULL! Cannot shoot.");
+            // Ignore shooter itself and all its limbs/weapons
+            if (h.transform == transform || h.transform.IsChildOf(transform) || h.transform.root == transform) continue;
+            
+            // Ignore other enemies
+            if (h.transform.GetComponentInParent<EnemyAI>() != null || h.transform.GetComponent<EnemyAI>() != null) continue;
+            
+            // Ignore triggers and bullets
+            if (h.collider.isTrigger && !h.transform.CompareTag("Player")) continue;
+            if (h.transform.name.Contains("Bullet")) continue;
+
+            // If we reached the player or any player child collider:
+            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player || h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
+            {
+                break; // Direct hit on player!
+            }
+
+            // Hit a solid wall / obstacle
+            blockedByObstacle = true;
+            break;
+        }
+
+        if (!blockedByObstacle)
+        {
+            PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
+            if (playerHealth == null) playerHealth = player.GetComponentInParent<PlayerHealth>();
+            if (playerHealth == null) playerHealth = Object.FindFirstObjectByType<PlayerHealth>();
+            if (playerHealth != null)
+            {
+                playerHealth.TakeDamage(damage, transform.position);
+            }
+        }
+    }
+
+    void ThrowGrenade()
+    {
+        SafeSetAnimTrigger(shootTrigger);
+        
+        if (enemyGrenadePrefab == null)
+        {
+            enemyGrenadePrefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            enemyGrenadePrefab.name = "EnemyGrenade";
+            enemyGrenadePrefab.transform.localScale = Vector3.one * 0.2f;
+            var rend = enemyGrenadePrefab.GetComponent<Renderer>();
+            if (rend != null) rend.material.color = Color.black;
+            
+            var rb = enemyGrenadePrefab.AddComponent<Rigidbody>();
+            var col = enemyGrenadePrefab.GetComponent<SphereCollider>();
+            if (col == null) col = enemyGrenadePrefab.AddComponent<SphereCollider>();
+            
+            var gScript = enemyGrenadePrefab.AddComponent<Grenade>();
+            gScript.explosionDamage = 45f;
+            gScript.explosionRadius = 4.5f;
+            gScript.delay = 2.5f;
+            
+            enemyGrenadePrefab.SetActive(false);
+        }
+
+        Vector3 spawnPos = (firePoint != null) ? firePoint.position : (transform.position + Vector3.up * 1.5f + transform.forward);
+        GameObject grenade = Instantiate(enemyGrenadePrefab, spawnPos, transform.rotation);
+        grenade.SetActive(true);
+        
+        Rigidbody grb = grenade.GetComponent<Rigidbody>();
+        if (grb != null && player != null)
+        {
+            Vector3 direction = (player.position - spawnPos);
+            float distance = direction.magnitude;
+            Vector3 force = direction.normalized * Mathf.Min(distance * 0.8f, 15f) + Vector3.up * 5f;
+            grb.AddForce(force, ForceMode.Impulse);
+            grb.AddTorque(Random.insideUnitSphere * 10f, ForceMode.Impulse);
         }
     }
 
@@ -596,26 +596,25 @@ public class EnemyAI : MonoBehaviour
         if (isDead) return;
         Debug.Log(">>> Enemy " + gameObject.name + " HIT! Damage: " + amount + " Health: " + health + " -> " + (health - amount));
         
-        // ANTI-STUNLOCK (FLINCH MECHANIC): Only flinch occasionally, never get stun-locked
-        if (amount >= 15f && health > amount && Time.time > flinchCooldownTime)
+        // ANTI-STUNLOCK (FLINCH MECHANIC): No longer slows them down. Only applies minor visual knockback if hit extremely hard.
+        if (amount >= 25f && health > amount && Time.time > flinchCooldownTime)
         {
-            flinchEndTime = Time.time + 0.2f; // Very brief flinch
-            flinchCooldownTime = Time.time + 2.0f; // Cannot flinch again for 2 seconds (forces them to fight back)
+            flinchCooldownTime = Time.time + 3.0f; 
             
             if (agent != null && agent.isOnNavMesh) 
             {
                 if (player != null) {
                     Vector3 knockbackDir = (transform.position - player.position).normalized;
                     knockbackDir.y = 0;
-                    agent.Move(knockbackDir * 0.5f); // Minor physical Knockback
+                    agent.Move(knockbackDir * 0.2f); // Very minor physical Knockback
                 }
             }
         }
         
         health -= amount;
         
-        // Play hit animation but don't interrupt shooting
-        if (Time.time > flinchCooldownTime - 1.8f) SafeSetAnimTrigger(hitTrigger);
+        // Removed SafeSetAnimTrigger(hitTrigger) completely! 
+        // Playing the Hit animation forces the enemy to stop shooting and looks like they are surrendering.
         
         // Alert others if shot from afar
         if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
@@ -655,6 +654,7 @@ public class EnemyAI : MonoBehaviour
         if (isDead) return;
         isDead = true;
         isCurrentlyAttacking = false;
+
         if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
         SafeSetAnimTrigger(dieTrigger);
         if (deathEffect != null) Instantiate(deathEffect, transform.position, transform.rotation);
@@ -662,7 +662,38 @@ public class EnemyAI : MonoBehaviour
         // Notify GameManager
         if (GameManager.instance != null) GameManager.instance.EnemyDied();
 
+        // Trigger Vampiric Heal for Player
+        if (PlayerAbilities.instance != null) PlayerAbilities.instance.OnEnemyKilled();
+
+        // 100% chance to drop a health pickup so you can easily find it
+        DropHealthPickup();
+
         Destroy(gameObject, destroyDelay);
+    }
+
+    void DropHealthPickup()
+    {
+        GameObject pickup = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        pickup.name = "HealthPickup";
+        pickup.transform.position = transform.position + Vector3.up * 1.5f;
+        pickup.transform.localScale = new Vector3(0.6f, 0.6f, 0.6f);
+        
+        var rend = pickup.GetComponent<Renderer>();
+        if (rend != null) {
+            rend.material.color = Color.green; // Green box for health
+        }
+        
+        // Add Rigidbody so it drops to the ground
+        var rb = pickup.AddComponent<Rigidbody>();
+        rb.mass = 1f;
+        
+        // Add trigger collider for the player to touch
+        var sc = pickup.AddComponent<SphereCollider>();
+        sc.isTrigger = true;
+        sc.radius = 2.0f; // Increased radius to ensure player hits it
+        
+        var healScript = pickup.AddComponent<HealthPickup>();
+        healScript.healAmount = 35f;
     }
 
     private void FixModelHeight()

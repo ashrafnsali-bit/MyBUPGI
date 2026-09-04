@@ -266,11 +266,39 @@ public class GameManager : MonoBehaviour
         qtrt.offsetMax = Vector2.zero;
     }
 
+    private float checkTimer = 1f;
+
     void Update()
     {
         if (waveText != null && !isGameOver)
         {
             waveText.text = "LEVEL " + currentLevel + "\n<size=20>Enemies: " + totalEnemies + " | KILLS: " + totalKills + "</size>";
+        }
+
+        // Failsafe to ensure level transitions even if counter gets out of sync
+        if (!isGameOver && !levelTransitioning)
+        {
+            checkTimer -= Time.deltaTime;
+            if (checkTimer <= 0)
+            {
+                checkTimer = 1f;
+                int actualCount = 0;
+                EnemyAI[] enemies = FindObjectsByType<EnemyAI>(FindObjectsSortMode.None);
+                foreach (var e in enemies)
+                {
+                    if (e.gameObject.activeInHierarchy && !e.name.Contains("SafeCopy") && e.gameObject != enemyPrefabTemplate && !e.GetComponent<EnemyAI>().health.Equals(0))
+                    {
+                        actualCount++;
+                    }
+                }
+                
+                if (actualCount == 0 && totalEnemies > 0)
+                {
+                    Debug.LogWarning("GameManager: Failsafe triggered! Actual enemies is 0 but totalEnemies was " + totalEnemies);
+                    totalEnemies = 0;
+                    StartCoroutine(LevelCompleteRoutine());
+                }
+            }
         }
 
         if (isGameOver && gameOverPanel != null)
@@ -357,6 +385,31 @@ public class GameManager : MonoBehaviour
             newEnemy.SetActive(true);
             newEnemy.name = "LevelEnemy_" + currentLevel + "_" + i;
             
+            // Randomize Archetype based on level progression
+            EnemyAI ai = newEnemy.GetComponent<EnemyAI>();
+            if (ai != null)
+            {
+                float rand = Random.value;
+                if (currentLevel >= 3)
+                {
+                    if (rand < 0.15f) ai.archetype = EnemyArchetype.Tank;
+                    else if (rand < 0.35f) ai.archetype = EnemyArchetype.Grenadier;
+                    else if (rand < 0.55f) ai.archetype = EnemyArchetype.Rusher;
+                    else if (rand < 0.75f) ai.archetype = EnemyArchetype.Sniper;
+                    else ai.archetype = EnemyArchetype.Assaulter;
+                }
+                else if (currentLevel >= 2)
+                {
+                    if (rand < 0.2f) ai.archetype = EnemyArchetype.Rusher;
+                    else if (rand < 0.4f) ai.archetype = EnemyArchetype.Sniper;
+                    else ai.archetype = EnemyArchetype.Assaulter;
+                }
+                else
+                {
+                    ai.archetype = EnemyArchetype.Assaulter; // Level 1 is basic enemies only
+                }
+            }
+            
             totalEnemies++;
             yield return new WaitForSeconds(Random.Range(0.5f, 1.5f)); // Staggered spawn
         }
@@ -366,44 +419,26 @@ public class GameManager : MonoBehaviour
     {
         if (player == null) return Vector3.zero;
 
-        // Try up to 15 times to find a valid spawn point that is not inside an object
-        for (int i = 0; i < 15; i++)
+        // Try to find a valid spawn point between 18m and 35m from player
+        for (int i = 0; i < 20; i++)
         {
             float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
-            float distance = Random.Range(15f, 25f);
-            Vector3 randomPoint = player.position + new Vector3(Mathf.Cos(angle) * distance, 10f, Mathf.Sin(angle) * distance); // Start higher
+            float distance = Random.Range(18f, 35f);
+            Vector3 candidatePos = player.position + new Vector3(Mathf.Cos(angle) * distance, 0, Mathf.Sin(angle) * distance);
 
-            RaycastHit hit;
-            // Raycast down to find ground
-            if (Physics.Raycast(randomPoint, Vector3.down, out hit, 20f))
+            UnityEngine.AI.NavMeshHit navHit;
+            if (UnityEngine.AI.NavMesh.SamplePosition(candidatePos, out navHit, 6.0f, UnityEngine.AI.NavMesh.AllAreas))
             {
-                Vector3 potentialSpawn = hit.point + Vector3.up * 0.5f;
-                
-                // 1. Check if the space is physically clear (not inside a container/wall)
-                // We check a sphere at the spawn height (y+1) to ensure the body fits
-                int blockLayer = ~LayerMask.GetMask("Player", "Enemy", "Ignore Raycast");
-                if (!Physics.CheckSphere(potentialSpawn + Vector3.up * 1f, 0.4f, blockLayer))
+                if (Vector3.Distance(navHit.position, player.position) >= 15f)
                 {
-                    // 2. Ensure it's on a valid NavMesh
-                    UnityEngine.AI.NavMeshHit navHit;
-                    if (UnityEngine.AI.NavMesh.SamplePosition(potentialSpawn, out navHit, 2.0f, UnityEngine.AI.NavMesh.AllAreas))
-                    {
-                        // 3. Ensure the enemy can actually walk to the player (not stuck inside a closed room)
-                        UnityEngine.AI.NavMeshPath path = new UnityEngine.AI.NavMeshPath();
-                        if (UnityEngine.AI.NavMesh.CalculatePath(navHit.position, player.position, UnityEngine.AI.NavMesh.AllAreas, path))
-                        {
-                            if (path.status == UnityEngine.AI.NavMeshPathStatus.PathComplete)
-                            {
-                                return navHit.position; // Perfect spawn!
-                            }
-                        }
-                    }
+                    return navHit.position;
                 }
             }
         }
 
-        // Fallback: Spawn directly in front of the player if all attempts fail
-        return player.position + player.forward * 8f + Vector3.up * 0.5f;
+        // Fallback: spawn at a safe 20m distance in a random direction
+        float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
+        return player.position + new Vector3(Mathf.Cos(fallbackAngle) * 22f, 0.5f, Mathf.Sin(fallbackAngle) * 22f);
     }
 
     public void RefreshEnemyCount()
@@ -441,8 +476,27 @@ public class GameManager : MonoBehaviour
     {
         if (isGameOver) return;
         isGameOver = true;
+        
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
+
+        if (gameOverPanel != null)
+        {
+            gameOverPanel.SetActive(true);
+            if (gameOverCanvasGroup != null)
+            {
+                gameOverCanvasGroup.alpha = 1f;
+                gameOverCanvasGroup.interactable = true;
+                gameOverCanvasGroup.blocksRaycasts = true;
+            }
+            if (waveText != null) waveText.gameObject.SetActive(false);
+            if (announcementText != null) announcementText.gameObject.SetActive(false);
+            if (gameOverText != null)
+            {
+                gameOverText.text = "YOU DIED\n<size=40>Total Kills: " + totalKills + "</size>";
+                gameOverText.color = new Color(1f, 0.2f, 0.2f);
+            }
+        }
         
         // Stop the game world
         Time.timeScale = 0f;

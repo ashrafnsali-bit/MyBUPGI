@@ -20,22 +20,34 @@ public class EnemyWeaponSetup : MonoBehaviour
 
         if (weaponPrefab != null)
         {
-            // Find the hand bone recursively
-            Transform rightHand = FindBone(transform, rightHandBoneName);
+            // Find the hand bone recursively with flexible naming
+            Transform rightHand = FindHandBone(transform);
             
             if (rightHand == null) {
-                Debug.LogWarning("EnemyWeaponSetup: Could not find bone '" + rightHandBoneName + "'. Attaching to root.");
+                Debug.LogWarning("EnemyWeaponSetup: Could not find hand bone. Attaching to upper body offset.");
                 rightHand = transform;
+                if (weaponPositionOffset == Vector3.zero) {
+                    weaponPositionOffset = new Vector3(0.25f, 1.2f, 0.4f);
+                }
             }
+            
             // Instantiate weapon
             spawnedWeapon = Instantiate(weaponPrefab, rightHand);
             spawnedWeapon.transform.localPosition = weaponPositionOffset;
             spawnedWeapon.transform.localRotation = Quaternion.Euler(weaponRotationOffset);
             spawnedWeapon.transform.localScale = Vector3.one * weaponScale;
 
-            // Remove player scripts from enemy weapon
+            // Remove player scripts and physics so weapon stays firmly in hand
             var gunScript = spawnedWeapon.GetComponent<GunScript>();
             if (gunScript != null) Destroy(gunScript);
+
+            var rb = spawnedWeapon.GetComponent<Rigidbody>();
+            if (rb != null) Destroy(rb);
+
+            foreach (var col in spawnedWeapon.GetComponentsInChildren<Collider>())
+            {
+                col.enabled = false;
+            }
 
             // Find or create FirePoint
             Transform muzzle = spawnedWeapon.transform.Find("Muzzle");
@@ -46,7 +58,6 @@ public class EnemyWeaponSetup : MonoBehaviour
             } else {
                 GameObject fp = new GameObject("FirePoint");
                 fp.transform.SetParent(spawnedWeapon.transform);
-                // Increased Z to 1.5f to ensure it spawns outside the enemy collider
                 fp.transform.localPosition = new Vector3(0, 0, 1.5f); 
                 fp.transform.localRotation = Quaternion.identity;
                 firePoint = fp.transform;
@@ -54,12 +65,29 @@ public class EnemyWeaponSetup : MonoBehaviour
         }
     }
 
-    Transform FindBone(Transform current, string name)
+    Transform FindHandBone(Transform root)
     {
-        if (current.name.Contains(name)) return current;
+        string[] candidates = new string[] {
+            "RightHand", "Right_Hand", "Hand_R", "hand_r", "hand.r", 
+            "mixamorig:RightHand", "Bip01 R Hand", "bip_hand_R", "R_hand",
+            "RightForeArm", "RightArm"
+        };
+
+        foreach (string name in candidates)
+        {
+            Transform found = FindBoneRecursive(root, name);
+            if (found != null) return found;
+        }
+
+        return null;
+    }
+
+    Transform FindBoneRecursive(Transform current, string name)
+    {
+        if (current.name.ToLower().Contains(name.ToLower())) return current;
         foreach (Transform child in current)
         {
-            Transform found = FindBone(child, name);
+            Transform found = FindBoneRecursive(child, name);
             if (found != null) return found;
         }
         return null;

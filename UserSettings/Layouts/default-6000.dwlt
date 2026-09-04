@@ -19,7 +19,7 @@ MonoBehaviour:
     width: 1536
     height: 772.8
   m_ShowMode: 4
-  m_Title: Console
+  m_Title: Inspector
   m_RootView: {fileID: 6}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
@@ -357,7 +357,7 @@ MonoBehaviour:
   m_Pos:
     serializedVersion: 2
     x: 0
-    y: 43.2
+    y: 0
     width: 1536
     height: 36
   m_SerializedDataModeController:
@@ -817,8 +817,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Inspector\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 1146.4
-    y: 79.200005
+    x: 1147.4
+    y: 24
     width: 388.59998
     height: 690.8
   m_SerializedDataModeController:
@@ -870,7 +870,7 @@ MonoBehaviour:
   m_Pos:
     serializedVersion: 2
     x: 0
-    y: 79.200005
+    y: 24
     width: 268.6
     height: 397.2
   m_SerializedDataModeController:
@@ -889,11 +889,18 @@ MonoBehaviour:
   m_SceneHierarchy:
     m_TreeViewState:
       scrollPos: {x: 0, y: 0}
-      m_SelectedIDs:
-      - m_Data: 60230
+      m_SelectedIDs: []
       m_LastClickedID:
         m_Data: 0
       m_ExpandedIDs:
+      - m_Data: -22490
+      - m_Data: -22212
+      - m_Data: -22058
+      - m_Data: -17190
+      - m_Data: -15026
+      - m_Data: -14748
+      - m_Data: -14590
+      - m_Data: -9722
       - m_Data: -1376
       m_RenameOverlay:
         m_UserAcceptedRename: 0
@@ -1598,8 +1605,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Game\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 269.6
-    y: 79.200005
+    x: 270.6
+    y: 24
     width: 874.80005
     height: 397.2
   m_SerializedDataModeController:
@@ -1660,7 +1667,7 @@ MonoBehaviour:
       width: 874.80005
       height: 376.2
     m_Scale: {x: 1.2501692, y: 1.2501692}
-    m_Translation: {x: 437.4592, y: 188.07454}
+    m_Translation: {x: 437.4592, y: 188.07452}
     m_MarginLeft: 0
     m_MarginRight: 0
     m_MarginTop: 0
@@ -1668,7 +1675,7 @@ MonoBehaviour:
     m_LastShownAreaInsideMargins:
       serializedVersion: 2
       x: -349.92
-      y: -150.43927
+      y: -150.43925
       width: 699.74536
       height: 300.91928
     m_MinimalGUI: 1
@@ -1702,7 +1709,7 @@ MonoBehaviour:
   m_Pos:
     serializedVersion: 2
     x: 0
-    y: 502.4
+    y: 447.2
     width: 1145.4
     height: 267.59998
   m_SerializedDataModeController:
