@@ -136,8 +136,7 @@ public class ContainerObstacleManager : MonoBehaviour
         string rootName = go.transform.root.name.ToLower();
 
         return name.Contains("container") || name.Contains("cargo") ||
-               rootName.Contains("container") || rootName.Contains("cargo") ||
-               go.CompareTag("Container");
+               rootName.Contains("container") || rootName.Contains("cargo");
     }
 
     public static BoxCollider SetupContainerObstacle(GameObject go)
