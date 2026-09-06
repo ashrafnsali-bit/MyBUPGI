@@ -58,6 +58,28 @@ public class EnemyAI : MonoBehaviour
     private float lastFireTime;
     private float nextPathUpdateTime;
     private bool isDead = false;
+    public bool IsDead => isDead;
+
+    public void WarpTo(Vector3 targetPos)
+    {
+        if (agent != null && agent.enabled)
+        {
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(targetPos, out hit, 8.0f, NavMesh.AllAreas))
+            {
+                agent.Warp(hit.position);
+            }
+            else
+            {
+                agent.Warp(targetPos);
+            }
+        }
+        else
+        {
+            transform.position = targetPos;
+        }
+    }
+
     private bool isCurrentlyAttacking = false;
     private float nextStrafeTime;
     private Vector3 strafeDestination;
@@ -324,7 +346,7 @@ public class EnemyAI : MonoBehaviour
         // Anti-hiding failsafe: periodically ensure enemy is not inside a container
         if (Time.time >= nextContainerCheckTime)
         {
-            nextContainerCheckTime = Time.time + 2.0f;
+            nextContainerCheckTime = Time.time + 0.5f;
             EnsureOutsideContainer();
         }
 
@@ -451,9 +473,12 @@ public class EnemyAI : MonoBehaviour
                     NavMeshHit strafeHit;
                     if (NavMesh.SamplePosition(candidatePos, out strafeHit, 3.0f, NavMesh.AllAreas))
                     {
-                        agent.isStopped = false;
-                        agent.speed = moveSpeed * 0.75f;
-                        agent.SetDestination(strafeHit.position);
+                        if (!IsInsideOrNearContainer(strafeHit.position))
+                        {
+                            agent.isStopped = false;
+                            agent.speed = moveSpeed * 0.75f;
+                            agent.SetDestination(strafeHit.position);
+                        }
                     }
                 }
             }
@@ -888,94 +913,19 @@ public class EnemyAI : MonoBehaviour
 
     public bool IsInsideOrNearContainer(Vector3 pos)
     {
-        Collider[] colliders = Physics.OverlapSphere(pos + Vector3.up * 1.0f, 1.8f);
-        foreach (var col in colliders)
-        {
-            if (col == null || col.isTrigger) continue;
-            string n = col.name.ToLower();
-            string rootN = col.transform.root.name.ToLower();
-            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
-            {
-                return true;
-            }
-        }
-
-        RaycastHit[] hits = Physics.RaycastAll(pos + Vector3.up * 0.1f, Vector3.up, 3.5f);
-        foreach (var hit in hits)
-        {
-            string n = hit.collider.name.ToLower();
-            string rootN = hit.transform.root.name.ToLower();
-            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ContainerObstacleManager.IsPointInsideAnyContainer(pos, 0.8f);
     }
 
     public void EnsureOutsideContainer()
     {
         if (isDead) return;
 
-        Collider[] cols = Physics.OverlapSphere(transform.position + Vector3.up * 1.0f, 1.2f);
-        bool inside = false;
-        Collider containerCol = null;
-
-        foreach (var col in cols)
+        BoxCollider container;
+        Vector3 safePos;
+        if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, out container, out safePos, 0.4f))
         {
-            if (col == null || col.isTrigger) continue;
-            string n = col.name.ToLower();
-            string rootN = col.transform.root.name.ToLower();
-            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
-            {
-                inside = true;
-                containerCol = col;
-                break;
-            }
-        }
-
-        if (!inside)
-        {
-            RaycastHit[] roofHits = Physics.RaycastAll(transform.position + Vector3.up * 0.1f, Vector3.up, 3.5f);
-            foreach (var rh in roofHits)
-            {
-                string n = rh.collider.name.ToLower();
-                string rootN = rh.transform.root.name.ToLower();
-                if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
-                {
-                    inside = true;
-                    containerCol = rh.collider;
-                    break;
-                }
-            }
-        }
-
-        if (inside && containerCol != null)
-        {
-            Vector3 containerCenter = containerCol.bounds.center;
-            Vector3 pushDir = (transform.position - containerCenter);
-            pushDir.y = 0;
-            if (pushDir.sqrMagnitude < 0.1f) pushDir = containerCol.transform.forward;
-            pushDir.Normalize();
-
-            float extentsSize = Mathf.Max(containerCol.bounds.extents.x, containerCol.bounds.extents.z) + 2.5f;
-            Vector3 targetSafePos = containerCenter + pushDir * extentsSize;
-            targetSafePos.y = transform.position.y;
-
-            NavMeshHit hit;
-            if (NavMesh.SamplePosition(targetSafePos, out hit, 10.0f, NavMesh.AllAreas))
-            {
-                if (agent != null && agent.isOnNavMesh)
-                {
-                    agent.Warp(hit.position);
-                }
-                else
-                {
-                    transform.position = hit.position;
-                }
-                Debug.LogWarning("Enemy " + gameObject.name + " was inside container " + containerCol.name + "! Ejected safely to: " + hit.position);
-            }
+            WarpTo(safePos);
+            Debug.LogWarning($"Enemy {gameObject.name} was inside container {(container != null ? container.gameObject.name : "unknown")}! Ejected safely to: {safePos}");
         }
     }
 }
