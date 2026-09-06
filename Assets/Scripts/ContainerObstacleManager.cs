@@ -132,11 +132,34 @@ public class ContainerObstacleManager : MonoBehaviour
         // Don't treat trigger helpers as containers
         if (go.name.Contains("_ContainerEjectorTrigger")) return false;
 
+        // Strictly ignore UI objects, Canvases, and RectTransforms
+        if (go.GetComponent<RectTransform>() != null || 
+            go.GetComponent<CanvasRenderer>() != null || 
+            go.GetComponentInParent<Canvas>() != null)
+        {
+            return false;
+        }
+
         string name = go.name.ToLower();
         string rootName = go.transform.root.name.ToLower();
 
-        return name.Contains("container") || name.Contains("cargo") ||
-               rootName.Contains("container") || rootName.Contains("cargo");
+        // Strictly ignore any non-shipping container objects
+        if (name.Contains("joystick") || name.Contains("ui") || name.Contains("hud") || 
+            name.Contains("canvas") || name.Contains("panel") || name.Contains("button"))
+        {
+            return false;
+        }
+
+        // Must be a 3D cargo / shipping container
+        bool isCargo = name.Contains("cargo_container") || 
+                       (name.Contains("cargo") && name.Contains("container")) ||
+                       rootName.Contains("cargo_container") ||
+                       (rootName.Contains("cargo") && rootName.Contains("container"));
+
+        if (!isCargo) return false;
+
+        // Must have a 3D mesh or existing renderer
+        return go.GetComponent<MeshFilter>() != null || go.GetComponent<Renderer>() != null;
     }
 
     public static BoxCollider SetupContainerObstacle(GameObject go)
@@ -156,9 +179,7 @@ public class ContainerObstacleManager : MonoBehaviour
             }
             else
             {
-                boxCol = go.AddComponent<BoxCollider>();
-                boxCol.center = new Vector3(0, 1.5f, 0);
-                boxCol.size = new Vector3(8f, 3f, 3f);
+                return null;
             }
         }
 
