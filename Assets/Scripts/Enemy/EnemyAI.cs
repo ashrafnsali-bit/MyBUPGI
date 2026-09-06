@@ -75,6 +75,7 @@ public class EnemyAI : MonoBehaviour
 
     private float nextGrenadeTime;
     private GameObject enemyGrenadePrefab;
+    private float nextContainerCheckTime = 0f;
 
     void Awake()
     {
@@ -187,6 +188,7 @@ public class EnemyAI : MonoBehaviour
         }
 
         if (autoFixHeight) FixModelHeight();
+        EnsureOutsideContainer();
     }
 
     void FindPlayer()
@@ -318,6 +320,13 @@ public class EnemyAI : MonoBehaviour
 
         EnsureFirePoint();
 
+        // Anti-hiding failsafe: periodically ensure enemy is not inside a container
+        if (Time.time >= nextContainerCheckTime)
+        {
+            nextContainerCheckTime = Time.time + 2.0f;
+            EnsureOutsideContainer();
+        }
+
         // TRACK PLAYER VELOCITY FOR PREDICTIVE AIMING
         if (Time.deltaTime > 0) {
             playerVelocity = (player.position - lastPlayerPos) / Time.deltaTime;
@@ -373,9 +382,12 @@ public class EnemyAI : MonoBehaviour
                 NavMeshHit hit;
                 if (NavMesh.SamplePosition(randomDirection, out hit, wanderRadius, 1))
                 {
-                    agent.isStopped = false;
-                    agent.SetDestination(hit.position);
-                    isWandering = true;
+                    if (!IsInsideOrNearContainer(hit.position))
+                    {
+                        agent.isStopped = false;
+                        agent.SetDestination(hit.position);
+                        isWandering = true;
+                    }
                 }
             }
         }
@@ -850,4 +862,98 @@ public class EnemyAI : MonoBehaviour
             GUI.Label(new Rect(x + 5, y + barHeight, barWidth, 20), $"[{stateName}] {navStatus}");
         }
     }
+
+    public bool IsInsideOrNearContainer(Vector3 pos)
+    {
+        Collider[] colliders = Physics.OverlapSphere(pos + Vector3.up * 1.0f, 1.8f);
+        foreach (var col in colliders)
+        {
+            if (col == null || col.isTrigger) continue;
+            string n = col.name.ToLower();
+            string rootN = col.transform.root.name.ToLower();
+            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+            {
+                return true;
+            }
+        }
+
+        RaycastHit[] hits = Physics.RaycastAll(pos + Vector3.up * 0.1f, Vector3.up, 3.5f);
+        foreach (var hit in hits)
+        {
+            string n = hit.collider.name.ToLower();
+            string rootN = hit.transform.root.name.ToLower();
+            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void EnsureOutsideContainer()
+    {
+        if (isDead) return;
+
+        Collider[] cols = Physics.OverlapSphere(transform.position + Vector3.up * 1.0f, 1.2f);
+        bool inside = false;
+        Collider containerCol = null;
+
+        foreach (var col in cols)
+        {
+            if (col == null || col.isTrigger) continue;
+            string n = col.name.ToLower();
+            string rootN = col.transform.root.name.ToLower();
+            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+            {
+                inside = true;
+                containerCol = col;
+                break;
+            }
+        }
+
+        if (!inside)
+        {
+            RaycastHit[] roofHits = Physics.RaycastAll(transform.position + Vector3.up * 0.1f, Vector3.up, 3.5f);
+            foreach (var rh in roofHits)
+            {
+                string n = rh.collider.name.ToLower();
+                string rootN = rh.transform.root.name.ToLower();
+                if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+                {
+                    inside = true;
+                    containerCol = rh.collider;
+                    break;
+                }
+            }
+        }
+
+        if (inside && containerCol != null)
+        {
+            Vector3 containerCenter = containerCol.bounds.center;
+            Vector3 pushDir = (transform.position - containerCenter);
+            pushDir.y = 0;
+            if (pushDir.sqrMagnitude < 0.1f) pushDir = containerCol.transform.forward;
+            pushDir.Normalize();
+
+            float extentsSize = Mathf.Max(containerCol.bounds.extents.x, containerCol.bounds.extents.z) + 2.5f;
+            Vector3 targetSafePos = containerCenter + pushDir * extentsSize;
+            targetSafePos.y = transform.position.y;
+
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(targetSafePos, out hit, 10.0f, NavMesh.AllAreas))
+            {
+                if (agent != null && agent.isOnNavMesh)
+                {
+                    agent.Warp(hit.position);
+                }
+                else
+                {
+                    transform.position = hit.position;
+                }
+                Debug.LogWarning("Enemy " + gameObject.name + " was inside container " + containerCol.name + "! Ejected safely to: " + hit.position);
+            }
+        }
+    }
 }
+

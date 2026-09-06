@@ -419,8 +419,8 @@ public class GameManager : MonoBehaviour
     {
         if (player == null) return Vector3.zero;
 
-        // Try to find a valid spawn point between 18m and 35m from player
-        for (int i = 0; i < 20; i++)
+        // Try to find a valid open spawn point between 18m and 35m from player
+        for (int i = 0; i < 30; i++)
         {
             float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
             float distance = Random.Range(18f, 35f);
@@ -431,14 +431,57 @@ public class GameManager : MonoBehaviour
             {
                 if (Vector3.Distance(navHit.position, player.position) >= 15f)
                 {
-                    return navHit.position;
+                    // Ensure the spawn point is NOT inside or near any container
+                    if (!IsInsideOrNearContainer(navHit.position))
+                    {
+                        return navHit.position;
+                    }
                 }
             }
         }
 
-        // Fallback: spawn at a safe 20m distance in a random direction
-        float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
-        return player.position + new Vector3(Mathf.Cos(fallbackAngle) * 22f, 0.5f, Mathf.Sin(fallbackAngle) * 22f);
+        // Fallback: spawn at a safe 22m distance in a random direction away from containers
+        for (int i = 0; i < 10; i++)
+        {
+            float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
+            Vector3 fallbackPos = player.position + new Vector3(Mathf.Cos(fallbackAngle) * 22f, 0.5f, Mathf.Sin(fallbackAngle) * 22f);
+            if (!IsInsideOrNearContainer(fallbackPos))
+            {
+                return fallbackPos;
+            }
+        }
+
+        return player.position + player.forward * 20f + Vector3.up * 0.5f;
+    }
+
+    public static bool IsInsideOrNearContainer(Vector3 pos)
+    {
+        // 1. Check surrounding radius for container colliders
+        Collider[] colliders = Physics.OverlapSphere(pos + Vector3.up * 1.0f, 2.0f);
+        foreach (var col in colliders)
+        {
+            if (col == null) continue;
+            string n = col.name.ToLower();
+            string rootN = col.transform.root.name.ToLower();
+            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+            {
+                return true;
+            }
+        }
+
+        // 2. Upward raycast to check if there is a container roof directly overhead (inside container)
+        RaycastHit[] hits = Physics.RaycastAll(pos + Vector3.up * 0.1f, Vector3.up, 4.0f);
+        foreach (var hit in hits)
+        {
+            string n = hit.collider.name.ToLower();
+            string rootN = hit.transform.root.name.ToLower();
+            if (n.Contains("container") || n.Contains("cargo") || rootN.Contains("container") || rootN.Contains("cargo"))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void RefreshEnemyCount()
