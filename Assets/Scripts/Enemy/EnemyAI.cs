@@ -76,6 +76,7 @@ public class EnemyAI : MonoBehaviour
     private float nextGrenadeTime;
     private GameObject enemyGrenadePrefab;
     private float nextContainerCheckTime = 0f;
+    private bool hasSpottedPlayer = false;
 
     void Awake()
     {
@@ -212,7 +213,7 @@ public class EnemyAI : MonoBehaviour
 
     private void EnforceAggressiveStats()
     {
-        // Balanced, fair combat stats
+        // Balanced, responsive combat stats
         health = Mathf.Max(health, 70f);
         damage = Mathf.Clamp(damage, 2f, 6f);
         retreatHealthThreshold = 0f;
@@ -221,53 +222,53 @@ public class EnemyAI : MonoBehaviour
         {
             case EnemyArchetype.Sniper:
                 damage = 7f;
-                attackRange = 30f;
-                sightRange = 40f;
-                fireRate = 0.9f; 
-                moveSpeed = 4.5f;
+                attackRange = 35f;
+                sightRange = 55f;
+                fireRate = 1.0f; 
+                moveSpeed = 5.0f;
                 break;
             case EnemyArchetype.Rusher:
                 health = 80f;
                 damage = 2f;
-                attackRange = 10f;
-                sightRange = 22f;
-                moveSpeed = 7.5f;
-                fireRate = 3.5f; 
+                attackRange = 14f;
+                sightRange = 45f;
+                moveSpeed = 8.0f;
+                fireRate = 3.8f; 
                 break;
             case EnemyArchetype.Tank:
                 health = 150f;
                 damage = 4f;
-                attackRange = 14f;
-                sightRange = 25f;
-                moveSpeed = 4.0f;
-                fireRate = 2.0f;
+                attackRange = 16f;
+                sightRange = 40f;
+                moveSpeed = 4.5f;
+                fireRate = 2.2f;
                 break;
             case EnemyArchetype.Grenadier:
                 health = 75f;
                 damage = 3f;
-                attackRange = 16f;
-                sightRange = 28f;
-                moveSpeed = 5.5f;
-                fireRate = 2.2f;
+                attackRange = 20f;
+                sightRange = 45f;
+                moveSpeed = 6.0f;
+                fireRate = 2.5f;
                 break;
             case EnemyArchetype.Assaulter:
             default:
                 damage = 3f;
-                attackRange = 18f;
-                sightRange = 30f;
-                moveSpeed = 6.0f;
-                fireRate = 2.5f;
+                attackRange = 22f;
+                sightRange = 48f;
+                moveSpeed = 6.5f;
+                fireRate = 2.8f;
                 break;
         }
 
-        attackHysteresis = 4f;
-        alertRadius = 25f;
+        attackHysteresis = 5f;
+        alertRadius = 35f;
 
         if (agent != null)
         {
             agent.speed = moveSpeed;
-            agent.angularSpeed = 260f;
-            agent.acceleration = 18f;
+            agent.angularSpeed = 300f;
+            agent.acceleration = 20f;
             agent.stoppingDistance = 2.5f;
             agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
         }
@@ -336,28 +337,34 @@ public class EnemyAI : MonoBehaviour
         float distance = Vector3.Distance(transform.position, player.position);
         float currentAttackRange = isCurrentlyAttacking ? (attackRange + attackHysteresis) : attackRange;
 
-        // Realistic combat engagement: only attack if within attackRange AND has clear line of sight
-        bool inRange = distance <= currentAttackRange;
-        bool hasLoS = inRange && HasLineOfSightToPlayer();
+        // Active visual spotting: if within sight range and has line of sight, spot player immediately!
+        bool canSeePlayer = (distance <= sightRange) && HasLineOfSightToPlayer();
 
-        if (hasLoS)
+        if (canSeePlayer)
         {
-            isCurrentlyAttacking = true;
-            Attack();
+            hasSpottedPlayer = true;
             if (!hasAlertedOthers && enableHiveMind)
             {
                 AlertNearbyEnemies();
             }
         }
-        else if (distance <= sightRange || hasAlertedOthers)
+
+        // Behavior decision:
+        if (canSeePlayer && distance <= currentAttackRange)
         {
-            // Detected player or alerted by nearby gunfire -> Chase into line-of-sight
+            // Close enough and visible -> Shoot and strafe!
+            isCurrentlyAttacking = true;
+            Attack();
+        }
+        else if (hasSpottedPlayer || canSeePlayer || hasAlertedOthers)
+        {
+            // Spotted player or alerted -> Aggressively chase to engage! Never stand still!
             isCurrentlyAttacking = false;
             Chase();
         }
         else
         {
-            // Player is far away and undetected -> Wander
+            // Far away and unspotted -> Patrol/Wander
             isCurrentlyAttacking = false;
             Wander();
         }
@@ -372,7 +379,7 @@ public class EnemyAI : MonoBehaviour
         {
             if (isWandering) {
                 isWandering = false;
-                nextWanderTime = Time.time + Random.Range(wanderWaitTime * 0.5f, wanderWaitTime * 1.5f);
+                nextWanderTime = Time.time + Random.Range(1.0f, 2.0f); // Shorter active pauses
             }
 
             if (Time.time >= nextWanderTime)
@@ -418,24 +425,37 @@ public class EnemyAI : MonoBehaviour
     void Attack()
     {
         if (player == null) return;
-        if (Time.time < spawnTime + 0.8f) return; // 0.8s initial spawn reaction delay
+        if (Time.time < spawnTime + 0.3f) return; // Quick 0.3s reaction
 
         if (agent != null && agent.isOnNavMesh) {
             agent.updateRotation = false; // Turn manually to track player
             
             float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-            if (distanceToPlayer > 3.5f)
+            if (distanceToPlayer > 5.0f)
             {
                 agent.isStopped = false;
                 agent.speed = moveSpeed;
-                agent.stoppingDistance = 2.0f;
+                agent.stoppingDistance = 3.0f;
                 agent.SetDestination(player.position);
             }
             else
             {
-                agent.isStopped = false;
-                agent.speed = moveSpeed * 0.5f;
+                // Active close-quarters combat: strafe left/right, never stand still!
+                if (Time.time >= nextStrafeTime)
+                {
+                    nextStrafeTime = Time.time + Random.Range(1.0f, 2.0f);
+                    Vector3 strafeDir = Vector3.Cross((player.position - transform.position).normalized, Vector3.up);
+                    if (Random.value < 0.5f) strafeDir = -strafeDir;
+                    Vector3 candidatePos = transform.position + strafeDir * Random.Range(2.5f, 4.5f);
+                    NavMeshHit strafeHit;
+                    if (NavMesh.SamplePosition(candidatePos, out strafeHit, 3.0f, NavMesh.AllAreas))
+                    {
+                        agent.isStopped = false;
+                        agent.speed = moveSpeed * 0.75f;
+                        agent.SetDestination(strafeHit.position);
+                    }
+                }
             }
         }
         
@@ -445,7 +465,7 @@ public class EnemyAI : MonoBehaviour
         if (direction != Vector3.zero)
         {
             Quaternion lookRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 15.0f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 18.0f);
         }
 
         float moveVel = (agent != null && !agent.isStopped) ? (agent.velocity.magnitude / moveSpeed) : 0f;
@@ -467,11 +487,11 @@ public class EnemyAI : MonoBehaviour
             float actualFireDelay = 1f / Mathf.Max(fireRate, 2.0f);
             if (Time.time >= lastFireTime + actualFireDelay)
             {
-                if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime && Random.value < 0.3f)
+                if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime && Random.value < 0.35f)
                 {
                     ThrowGrenade();
                     lastFireTime = Time.time;
-                    nextGrenadeTime = Time.time + Random.Range(6f, 10f);
+                    nextGrenadeTime = Time.time + Random.Range(5f, 8f);
                 }
                 else
                 {
@@ -479,10 +499,11 @@ public class EnemyAI : MonoBehaviour
                     lastFireTime = Time.time;
                     burstShotsFired++;
                     
-                    if (burstShotsFired >= Random.Range(2, 4))
+                    // Sustained burst of 4-7 shots, then brief 0.8s - 1.3s tactical pause
+                    if (burstShotsFired >= Random.Range(4, 7))
                     {
                         isReloadingBurst = true;
-                        burstReloadTime = Time.time + Random.Range(2.5f, 4.0f); // 2.5s to 4.0s long reload breather
+                        burstReloadTime = Time.time + Random.Range(0.8f, 1.3f);
                     }
                 }
             }
@@ -693,6 +714,7 @@ public class EnemyAI : MonoBehaviour
         // Removed SafeSetAnimTrigger(hitTrigger) completely! 
         // Playing the Hit animation forces the enemy to stop shooting and looks like they are surrendering.
         
+        hasSpottedPlayer = true;
         // Alert others if shot from afar
         if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
         
@@ -718,10 +740,11 @@ public class EnemyAI : MonoBehaviour
         if (isDead || targetPlayer == null) return;
         if (player == null) player = targetPlayer;
         hasAlertedOthers = true; // Prevent infinite alert loops
+        hasSpottedPlayer = true;
         
         float distToTarget = Vector3.Distance(transform.position, player.position);
-        if (distToTarget <= alertRadius * 1.5f) {
-            sightRange = Mathf.Max(sightRange, Mathf.Min(distToTarget + 5f, 35f));
+        if (distToTarget <= alertRadius * 2.0f) {
+            sightRange = Mathf.Max(sightRange, Mathf.Min(distToTarget + 10f, 55f));
         }
     }
 
