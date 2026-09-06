@@ -8,28 +8,28 @@ public class EnemyAI : MonoBehaviour
     public EnemyArchetype archetype = EnemyArchetype.Assaulter;
 
     [Header("Stats")]
-    public float health = 120;
+    public float health = 100;
     private float maxHealth;
-    public float damage = 35; // Increased damage
-    public float sightRange = 500; // Very large sight range
-    public float attackRange = 80; // Start shooting much earlier
-    public float attackHysteresis = 15f;
-    public float moveSpeed = 13.0f; // Very fast
-    public float rotationSpeed = 25; // Snappier aim
-    public float fireRate = 20f; // Extremely fast machine gun speed
+    public float damage = 4; // Balanced damage per bullet
+    public float sightRange = 30f; // Balanced vision range (was 500)
+    public float attackRange = 18f; // Balanced engagement range (was 80)
+    public float attackHysteresis = 4f; // Reasonable hysteresis
+    public float moveSpeed = 6.0f;
+    public float rotationSpeed = 14f;
+    public float fireRate = 2.5f;
     
     [Header("Natural Movement")]
-    public float wanderRadius = 15f; 
+    public float wanderRadius = 12f; 
     public float wanderWaitTime = 3f;
     private float nextWanderTime;
     private bool isWandering = false;
 
     [Header("Tactical AI Options")]
     public bool enableHiveMind = true;
-    public float alertRadius = 150f; // One gunshot alerts everyone
-    public float retreatHealthThreshold = 0.0f; // Never retreat!
-    public float dodgeChance = 0.2f; // Less dodging, more aggressive pushing
-    public float dodgeCooldown = 2.0f; // Dodge less frequently
+    public float alertRadius = 25f; // Alert nearby allies within 25m (was 150)
+    public float retreatHealthThreshold = 0.0f;
+    public float dodgeChance = 0.25f;
+    public float dodgeCooldown = 2.0f;
 
     [Header("References")]
     public Transform firePoint;
@@ -210,59 +210,63 @@ public class EnemyAI : MonoBehaviour
 
     private void EnforceAggressiveStats()
     {
-        // Casual, heroic combat stats (Player survives 150+ direct hits!)
+        // Balanced, fair combat stats
         health = Mathf.Max(health, 70f);
-        damage = Mathf.Clamp(damage, 2f, 5f); // 2-5 damage per bullet (Super survivable!)
-        sightRange = Mathf.Max(sightRange, 80f);
-        attackRange = Mathf.Max(attackRange, 30f);
-        moveSpeed = Mathf.Max(moveSpeed, 6.5f);
-        rotationSpeed = Mathf.Max(rotationSpeed, 10f);
-        fireRate = Mathf.Clamp(fireRate, 2.5f, 3.5f);
-        alertRadius = Mathf.Max(alertRadius, 70f);
+        damage = Mathf.Clamp(damage, 2f, 6f);
         retreatHealthThreshold = 0f;
 
         switch (archetype)
         {
             case EnemyArchetype.Sniper:
-                damage = 8f;
-                attackRange = 50f;
-                fireRate = 1.0f; 
-                moveSpeed = 5.5f;
+                damage = 7f;
+                attackRange = 30f;
+                sightRange = 40f;
+                fireRate = 0.9f; 
+                moveSpeed = 4.5f;
                 break;
             case EnemyArchetype.Rusher:
                 health = 80f;
                 damage = 2f;
-                attackRange = 20f;
-                moveSpeed = 8.5f;
-                fireRate = 4f; 
+                attackRange = 10f;
+                sightRange = 22f;
+                moveSpeed = 7.5f;
+                fireRate = 3.5f; 
                 break;
             case EnemyArchetype.Tank:
-                health = 160f;
-                damage = 5f;
-                attackRange = 25f;
-                moveSpeed = 5.0f;
-                fireRate = 2.5f;
+                health = 150f;
+                damage = 4f;
+                attackRange = 14f;
+                sightRange = 25f;
+                moveSpeed = 4.0f;
+                fireRate = 2.0f;
                 break;
             case EnemyArchetype.Grenadier:
                 health = 75f;
                 damage = 3f;
-                moveSpeed = 6.0f;
-                fireRate = 3.0f;
+                attackRange = 16f;
+                sightRange = 28f;
+                moveSpeed = 5.5f;
+                fireRate = 2.2f;
                 break;
             case EnemyArchetype.Assaulter:
             default:
                 damage = 3f;
-                moveSpeed = 6.5f;
-                fireRate = 3.0f;
+                attackRange = 18f;
+                sightRange = 30f;
+                moveSpeed = 6.0f;
+                fireRate = 2.5f;
                 break;
         }
+
+        attackHysteresis = 4f;
+        alertRadius = 25f;
 
         if (agent != null)
         {
             agent.speed = moveSpeed;
             agent.angularSpeed = 260f;
             agent.acceleration = 18f;
-            agent.stoppingDistance = 3.0f;
+            agent.stoppingDistance = 2.5f;
             agent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
         }
     }
@@ -323,21 +327,30 @@ public class EnemyAI : MonoBehaviour
         float distance = Vector3.Distance(transform.position, player.position);
         float currentAttackRange = isCurrentlyAttacking ? (attackRange + attackHysteresis) : attackRange;
 
-        // Engage when within range
-        if (distance <= currentAttackRange)
+        // Realistic combat engagement: only attack if within attackRange AND has clear line of sight
+        bool inRange = distance <= currentAttackRange;
+        bool hasLoS = inRange && HasLineOfSightToPlayer();
+
+        if (hasLoS)
         {
             isCurrentlyAttacking = true;
             Attack();
+            if (!hasAlertedOthers && enableHiveMind)
+            {
+                AlertNearbyEnemies();
+            }
         }
-        else
+        else if (distance <= sightRange || hasAlertedOthers)
         {
+            // Detected player or alerted by nearby gunfire -> Chase into line-of-sight
             isCurrentlyAttacking = false;
             Chase();
         }
-        
-        if (!hasAlertedOthers && enableHiveMind)
+        else
         {
-            AlertNearbyEnemies();
+            // Player is far away and undetected -> Wander
+            isCurrentlyAttacking = false;
+            Wander();
         }
     }
 
@@ -464,6 +477,38 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+    public bool HasLineOfSightToPlayer()
+    {
+        if (player == null) return false;
+        
+        Vector3 eyePos = transform.position + Vector3.up * 1.5f;
+        Vector3 playerChest = player.position + Vector3.up * 1.0f;
+        Vector3 toPlayer = playerChest - eyePos;
+        float dist = toPlayer.magnitude;
+
+        RaycastHit[] hits = Physics.RaycastAll(eyePos, toPlayer.normalized, dist, ~0, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        foreach (RaycastHit h in hits)
+        {
+            if (h.transform == transform || h.transform.IsChildOf(transform) || h.transform.root == transform) continue;
+            if (h.transform.GetComponentInParent<EnemyAI>() != null || h.transform.GetComponent<EnemyAI>() != null) continue;
+            if (h.collider.isTrigger && !h.transform.CompareTag("Player")) continue;
+            if (h.transform.name.Contains("Bullet")) continue;
+
+            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player || h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
+            {
+                return true;
+            }
+
+            // Hit solid wall or obstacle
+            return false;
+        }
+
+        // No obstacles found between enemy and player
+        return true;
+    }
+
     void Shoot()
     {
         if (player == null) return;
@@ -485,8 +530,36 @@ public class EnemyAI : MonoBehaviour
         Vector3 targetPos = player.position + Vector3.up * 1.0f;
         Vector3 baseDir = (targetPos - spawnPos).normalized;
 
-        // Controlled bullet spread so player can dodge with movement
-        Vector3 fireDirection = baseDir + new Vector3(Random.Range(-0.035f, 0.035f), Random.Range(-0.035f, 0.035f), Random.Range(-0.035f, 0.035f));
+        // Balanced bullet spread: depends on archetype and player movement
+        float spreadAmount = 0.05f;
+        switch (archetype)
+        {
+            case EnemyArchetype.Sniper:
+                spreadAmount = 0.015f;
+                break;
+            case EnemyArchetype.Rusher:
+                spreadAmount = 0.08f;
+                break;
+            case EnemyArchetype.Tank:
+                spreadAmount = 0.065f;
+                break;
+            case EnemyArchetype.Assaulter:
+            default:
+                spreadAmount = 0.045f;
+                break;
+        }
+
+        // Dodging reward: if player is sprinting/dodging, increase spread so bullets miss
+        if (playerVelocity.magnitude > 1.2f)
+        {
+            spreadAmount += 0.025f;
+        }
+
+        Vector3 fireDirection = baseDir + new Vector3(
+            Random.Range(-spreadAmount, spreadAmount), 
+            Random.Range(-spreadAmount, spreadAmount), 
+            Random.Range(-spreadAmount, spreadAmount)
+        );
         fireDirection.Normalize();
 
         Quaternion fireRotation = Quaternion.LookRotation(fireDirection);
@@ -501,22 +574,19 @@ public class EnemyAI : MonoBehaviour
             
             BulletScript bs = bullet.GetComponent<BulletScript>();
             if (bs != null) {
-                bs.damage = 0; // Visual only to prevent duplicate damage
+                bs.damage = 0; // Visual bullet; raycast below applies fair synchronized damage
                 bs.isEnemyBullet = true; 
                 bs.owner = gameObject;
             }
         }
 
-        // 2. GUARANTEED DIRECT HITSCAN (Filtered Line of Sight)
-        Vector3 rayOrigin = transform.position + Vector3.up * 1.4f;
-        Vector3 toPlayer = (targetPos - rayOrigin);
-        float distToPlayer = toPlayer.magnitude;
-        Vector3 rayDir = toPlayer.normalized;
+        // 2. FAIR HIT DETECTION ALONG SPREAD TRAJECTORY (Allows player to dodge)
+        Vector3 rayOrigin = spawnPos;
+        float maxBulletDist = attackRange + attackHysteresis + 3.0f;
 
-        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, rayDir, distToPlayer, ~0, QueryTriggerInteraction.Ignore);
+        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, fireDirection, maxBulletDist, ~0, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
 
-        bool blockedByObstacle = false;
         foreach (RaycastHit h in hits)
         {
             // Ignore shooter itself and all its limbs/weapons
@@ -532,23 +602,18 @@ public class EnemyAI : MonoBehaviour
             // If we reached the player or any player child collider:
             if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player || h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
             {
-                break; // Direct hit on player!
+                PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
+                if (playerHealth == null) playerHealth = player.GetComponentInParent<PlayerHealth>();
+                if (playerHealth == null) playerHealth = Object.FindFirstObjectByType<PlayerHealth>();
+                if (playerHealth != null)
+                {
+                    playerHealth.TakeDamage(damage, transform.position);
+                }
+                break;
             }
 
-            // Hit a solid wall / obstacle
-            blockedByObstacle = true;
+            // Hit a solid wall / obstacle - bullet is blocked
             break;
-        }
-
-        if (!blockedByObstacle)
-        {
-            PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-            if (playerHealth == null) playerHealth = player.GetComponentInParent<PlayerHealth>();
-            if (playerHealth == null) playerHealth = Object.FindFirstObjectByType<PlayerHealth>();
-            if (playerHealth != null)
-            {
-                playerHealth.TakeDamage(damage, transform.position);
-            }
         }
     }
 
@@ -642,10 +707,9 @@ public class EnemyAI : MonoBehaviour
         if (player == null) player = targetPlayer;
         hasAlertedOthers = true; // Prevent infinite alert loops
         
-        // Artificially boost sight range to ensure they start chasing immediately
         float distToTarget = Vector3.Distance(transform.position, player.position);
-        if (sightRange < distToTarget + 5f) {
-            sightRange = distToTarget + 10f;
+        if (distToTarget <= alertRadius * 1.5f) {
+            sightRange = Mathf.Max(sightRange, Mathf.Min(distToTarget + 5f, 35f));
         }
     }
 
