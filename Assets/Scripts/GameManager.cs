@@ -440,23 +440,34 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // Fallback: spawn at a safe 22m distance in a random direction away from containers
-        for (int i = 0; i < 10; i++)
+        // Fallback: spawn at a safe 22m distance in a random direction away from containers and tanks
+        for (int i = 0; i < 20; i++)
         {
             float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
             Vector3 fallbackPos = player.position + new Vector3(Mathf.Cos(fallbackAngle) * 22f, 0.5f, Mathf.Sin(fallbackAngle) * 22f);
-            if (!IsInsideOrNearContainer(fallbackPos))
+            UnityEngine.AI.NavMeshHit navHit;
+            if (UnityEngine.AI.NavMesh.SamplePosition(fallbackPos, out navHit, 8.0f, UnityEngine.AI.NavMesh.AllAreas))
             {
-                return fallbackPos;
+                if (!IsInsideOrNearContainer(navHit.position))
+                {
+                    return navHit.position;
+                }
             }
         }
 
-        return player.position + player.forward * 20f + Vector3.up * 0.5f;
+        Vector3 finalPos = player.position + player.forward * 20f + Vector3.up * 0.5f;
+        BoxCollider hitBox;
+        Vector3 safePos;
+        if (ContainerObstacleManager.IsPointInsideAnyContainer(finalPos, out hitBox, out safePos, 2.0f))
+        {
+            return safePos;
+        }
+        return finalPos;
     }
 
     public static bool IsInsideOrNearContainer(Vector3 pos)
     {
-        return ContainerObstacleManager.IsPointInsideAnyContainer(pos, 1.2f);
+        return ContainerObstacleManager.IsPointInsideAnyContainer(pos, 2.5f);
     }
 
     public void RefreshEnemyCount()

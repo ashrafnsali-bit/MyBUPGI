@@ -170,7 +170,15 @@ public class BulletScript : MonoBehaviour {
 						}
 					}
 					
-					// Penetration Logic
+					// Enemy bullets NEVER penetrate solid obstacles or containers
+					if (isEnemyBullet)
+					{
+						if (debugBullets) Debug.Log(gameObject.name + " (Enemy Bullet) blocked by solid obstacle: " + hit.transform.name);
+						Destroy(gameObject);
+						return;
+					}
+
+					// Penetration Logic (for player bullets)
 					bool isPenetrable = false;
 					try {
 						string objName = hit.transform.name.ToLower();

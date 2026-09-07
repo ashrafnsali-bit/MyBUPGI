@@ -6,9 +6,10 @@ using UnityEditor;
 #endif
 
 /// <summary>
-/// ContainerObstacleManager ensures that cargo/shipping containers are 100% impenetrable
-/// to enemies. It carves NavMesh obstacles, creates physical and trigger barriers,
-/// and instantly ejects any enemy that touches, enters, or spawns inside containers.
+/// ContainerObstacleManager ensures that cargo containers, oil tanks, silos, and industrial
+/// containers are 100% impenetrable to enemies. It carves NavMesh obstacles, creates physical
+/// barriers and triggers, prevents enemies from spawning inside, and immediately ejects any
+/// enemy that enters, touches, or spawns inside them.
 /// </summary>
 public class ContainerObstacleManager : MonoBehaviour
 {
@@ -42,10 +43,10 @@ public class ContainerObstacleManager : MonoBehaviour
 
     void Update()
     {
-        // Continuous failsafe: periodic sweep to guarantee no enemy can remain inside a container
+        // Continuous failsafe: sweep every 0.25s to guarantee no enemy can stay inside a container or tank
         if (Time.time >= nextSweepTime)
         {
-            nextSweepTime = Time.time + 0.5f;
+            nextSweepTime = Time.time + 0.25f;
             EjectAllEnemiesFromAllContainers();
         }
     }
@@ -122,7 +123,7 @@ public class ContainerObstacleManager : MonoBehaviour
             }
         }
 
-        Debug.Log($"[ContainerObstacleManager] Successfully registered and protected {count} containers.");
+        Debug.Log($"[ContainerObstacleManager] Successfully registered and protected {count} containers and tanks.");
         return count;
     }
 
@@ -140,10 +141,18 @@ public class ContainerObstacleManager : MonoBehaviour
             return false;
         }
 
+        // Strictly ignore Player, Weapons, Bullets, Enemies, Cameras
+        if (go.CompareTag("Player") || go.GetComponentInParent<PlayerHealth>() != null ||
+            go.GetComponentInParent<EnemyAI>() != null || go.GetComponent<EnemyAI>() != null ||
+            go.GetComponent<Camera>() != null)
+        {
+            return false;
+        }
+
         string name = go.name.ToLower();
         string rootName = go.transform.root.name.ToLower();
 
-        // Strictly ignore any non-shipping container objects
+        // Strictly ignore UI / HUD
         if (name.Contains("joystick") || name.Contains("ui") || name.Contains("hud") || 
             name.Contains("canvas") || name.Contains("panel") || name.Contains("button"))
         {
@@ -156,7 +165,17 @@ public class ContainerObstacleManager : MonoBehaviour
                        rootName.Contains("cargo_container") ||
                        (rootName.Contains("cargo") && rootName.Contains("container"));
 
-        if (!isCargo) return false;
+        // Must be an industrial oil tank / silo / storage tank / cistern
+        bool isOilTank = name.Contains("oil_tank") || name.Contains("oiltank") ||
+                         rootName.Contains("oil_tank") || rootName.Contains("oiltank") ||
+                         name.StartsWith("oil_tank") || rootName.StartsWith("oil_tank") ||
+                         (name.Contains("tank") && !name.Contains("archetype")) ||
+                         name.Contains("silo") || name.Contains("cistern");
+
+        // Must be an industrial dumpster / waste container
+        bool isDumpster = name.Contains("dumpster") || rootName.Contains("dumpster");
+
+        if (!isCargo && !isOilTank && !isDumpster) return false;
 
         // Must have a 3D mesh or existing renderer
         return go.GetComponent<MeshFilter>() != null || go.GetComponent<Renderer>() != null;
@@ -170,12 +189,27 @@ public class ContainerObstacleManager : MonoBehaviour
         BoxCollider boxCol = go.GetComponent<BoxCollider>();
         if (boxCol == null)
         {
+            boxCol = go.AddComponent<BoxCollider>();
+        }
+
+        MeshFilter mf = go.GetComponent<MeshFilter>();
+        if (mf != null && mf.sharedMesh != null)
+        {
+            boxCol.center = mf.sharedMesh.bounds.center;
+            boxCol.size = mf.sharedMesh.bounds.size;
+        }
+        else
+        {
             Renderer rend = go.GetComponent<Renderer>();
             if (rend != null)
             {
-                boxCol = go.AddComponent<BoxCollider>();
+                Vector3 ls = go.transform.lossyScale;
                 boxCol.center = go.transform.InverseTransformPoint(rend.bounds.center);
-                boxCol.size = rend.bounds.size;
+                boxCol.size = new Vector3(
+                    ls.x != 0 ? rend.bounds.size.x / Mathf.Abs(ls.x) : rend.bounds.size.x,
+                    ls.y != 0 ? rend.bounds.size.y / Mathf.Abs(ls.y) : rend.bounds.size.y,
+                    ls.z != 0 ? rend.bounds.size.z / Mathf.Abs(ls.z) : rend.bounds.size.z
+                );
             }
             else
             {
@@ -185,7 +219,7 @@ public class ContainerObstacleManager : MonoBehaviour
 
         boxCol.isTrigger = false; // Solid physical blocker
 
-        // Setup carving NavMeshObstacle
+        // Setup carving NavMeshObstacle to completely remove interior NavMesh
         NavMeshObstacle obstacle = go.GetComponent<NavMeshObstacle>();
         if (obstacle == null)
         {
@@ -194,11 +228,11 @@ public class ContainerObstacleManager : MonoBehaviour
 
         obstacle.shape = NavMeshObstacleShape.Box;
         obstacle.center = boxCol.center;
-        // Expand carving volume by 1.2m laterally and in height to completely carve out interior & edges
+        // Expand carving volume by 1.6m laterally and full height to completely carve out interior & edges
         obstacle.size = new Vector3(
-            boxCol.size.x + 1.2f,
-            Mathf.Max(boxCol.size.y + 1.0f, 4.0f),
-            boxCol.size.z + 1.2f
+            boxCol.size.x + 1.6f,
+            Mathf.Max(boxCol.size.y + 1.5f, 6.0f),
+            boxCol.size.z + 1.6f
         );
         obstacle.carving = true;
         obstacle.carveOnlyStationary = false;
@@ -219,7 +253,7 @@ public class ContainerObstacleManager : MonoBehaviour
         if (triggerCol == null) triggerCol = triggerObj.AddComponent<BoxCollider>();
         triggerCol.isTrigger = true;
         triggerCol.center = boxCol.center;
-        triggerCol.size = boxCol.size + new Vector3(0.6f, 0.6f, 0.6f);
+        triggerCol.size = boxCol.size + new Vector3(1.0f, 1.0f, 1.0f);
 
         ContainerEjectionTrigger ejector = triggerObj.GetComponent<ContainerEjectionTrigger>();
         if (ejector == null) ejector = triggerObj.AddComponent<ContainerEjectionTrigger>();
@@ -239,8 +273,11 @@ public class ContainerObstacleManager : MonoBehaviour
         Vector3 localPoint = box.transform.InverseTransformPoint(worldPos) - box.center;
         Vector3 halfSize = box.size * 0.5f;
 
+        // Height check with tolerance
+        if (Mathf.Abs(localPoint.y) > (halfSize.y + padding + 1.0f))
+            return false;
+
         return Mathf.Abs(localPoint.x) <= (halfSize.x + padding) &&
-               Mathf.Abs(localPoint.y) <= (halfSize.y + padding) &&
                Mathf.Abs(localPoint.z) <= (halfSize.z + padding);
     }
 
@@ -274,55 +311,79 @@ public class ContainerObstacleManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Computes a safe outside position on the NavMesh clear of the container.
+    /// Computes a safe outside position on the NavMesh clear of the container or tank.
     /// </summary>
     public static Vector3 GetSafePositionOutside(BoxCollider box, Vector3 worldPos)
     {
         if (box == null) return worldPos;
 
-        Vector3 localPoint = box.transform.InverseTransformPoint(worldPos) - box.center;
         Vector3 halfSize = box.size * 0.5f;
+        Vector3 worldCenter = box.transform.TransformPoint(box.center);
 
-        // Try lateral exit (sides of container)
-        float exitX = (localPoint.x >= 0 ? 1 : -1) * (halfSize.x + 2.5f);
-        Vector3 candLocalX = box.center + new Vector3(exitX, localPoint.y, localPoint.z);
-        Vector3 candWorldX = box.transform.TransformPoint(candLocalX);
-        candWorldX.y = worldPos.y;
+        // Vector pointing outward from center towards current world position
+        Vector3 outward = worldPos - worldCenter;
+        outward.y = 0;
+        if (outward.sqrMagnitude < 0.1f)
+        {
+            outward = box.transform.forward;
+        }
+        outward.Normalize();
 
+        float maxRadius = Mathf.Max(
+            Mathf.Abs(halfSize.x * box.transform.lossyScale.x),
+            Mathf.Abs(halfSize.z * box.transform.lossyScale.z)
+        );
+
+        // 1. Try directly outward along heading (+4.0m clearance)
+        Vector3 cand1 = worldCenter + outward * (maxRadius + 4.0f);
+        cand1.y = worldPos.y;
         NavMeshHit hit;
-        if (NavMesh.SamplePosition(candWorldX, out hit, 8f, NavMesh.AllAreas))
+        if (NavMesh.SamplePosition(cand1, out hit, 10f, NavMesh.AllAreas))
         {
-            return hit.position;
-        }
-
-        // Try longitudinal exit (ends of container)
-        float exitZ = (localPoint.z >= 0 ? 1 : -1) * (halfSize.z + 2.5f);
-        Vector3 candLocalZ = box.center + new Vector3(localPoint.x, localPoint.y, exitZ);
-        Vector3 candWorldZ = box.transform.TransformPoint(candLocalZ);
-        candWorldZ.y = worldPos.y;
-
-        if (NavMesh.SamplePosition(candWorldZ, out hit, 8f, NavMesh.AllAreas))
-        {
-            return hit.position;
-        }
-
-        // Radial fallback: test 12 directions around container
-        for (int angle = 0; angle < 360; angle += 30)
-        {
-            Vector3 radialDir = Quaternion.Euler(0, angle, 0) * Vector3.forward;
-            Vector3 sampleTarget = box.transform.TransformPoint(box.center) + radialDir * (Mathf.Max(halfSize.x, halfSize.z) + 3.0f);
-            sampleTarget.y = worldPos.y;
-            if (NavMesh.SamplePosition(sampleTarget, out hit, 10f, NavMesh.AllAreas))
+            if (!IsInsideBoxCollider(box, hit.position, 0.4f))
             {
                 return hit.position;
             }
         }
 
-        return candWorldX;
+        // 2. Radial sweep around obstacle in 16 directions with generous clearance
+        for (int angle = 0; angle < 360; angle += 22)
+        {
+            Vector3 radialDir = Quaternion.Euler(0, angle, 0) * Vector3.forward;
+            Vector3 cand = worldCenter + radialDir * (maxRadius + 4.5f);
+            cand.y = worldPos.y;
+            if (NavMesh.SamplePosition(cand, out hit, 10f, NavMesh.AllAreas))
+            {
+                if (!IsInsideBoxCollider(box, hit.position, 0.4f))
+                {
+                    return hit.position;
+                }
+            }
+        }
+
+        // 3. Fallback: warp towards player on open ground
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+        {
+            Vector3 toPlayer = (playerObj.transform.position - worldCenter);
+            toPlayer.y = 0;
+            if (toPlayer.sqrMagnitude > 1f)
+            {
+                Vector3 candPlayer = worldCenter + toPlayer.normalized * (maxRadius + 4.5f);
+                candPlayer.y = playerObj.transform.position.y;
+                if (NavMesh.SamplePosition(candPlayer, out hit, 12f, NavMesh.AllAreas))
+                {
+                    return hit.position;
+                }
+                return candPlayer;
+            }
+        }
+
+        return worldCenter + outward * (maxRadius + 4.5f);
     }
 
     /// <summary>
-    /// Finds all enemies in the scene and warps any enemy trapped inside a container to safety.
+    /// Finds all enemies in the scene and warps any enemy trapped inside a container or tank to safety.
     /// </summary>
     public static int EjectAllEnemiesFromAllContainers()
     {
@@ -340,7 +401,7 @@ public class ContainerObstacleManager : MonoBehaviour
             {
                 enemy.WarpTo(safePos);
                 count++;
-                Debug.LogWarning($"[ContainerObstacleManager] Ejected {enemy.gameObject.name} from inside {container.gameObject.name} to safe position {safePos}!");
+                Debug.LogWarning($"[ContainerObstacleManager] Ejected {enemy.gameObject.name} from inside {(container != null ? container.gameObject.name : "container/tank")} to safe position {safePos}!");
             }
         }
 
@@ -348,14 +409,14 @@ public class ContainerObstacleManager : MonoBehaviour
     }
 
 #if UNITY_EDITOR
-    [MenuItem("Tools/Block Containers & Eject Enemies")]
+    [MenuItem("Tools/Block Containers & Tanks & Eject Enemies")]
     public static void MenuBlockContainers()
     {
         int containerCount = SetupAllContainersInScene();
         int ejectedCount = EjectAllEnemiesFromAllContainers();
         EditorUtility.DisplayDialog(
-            "Containers Protected",
-            $"Configured {containerCount} containers with carving NavMeshObstacles and physical barriers.\nEjected {ejectedCount} enemies to safe ground outside containers.",
+            "Containers & Tanks Protected",
+            $"Configured {containerCount} containers & oil tanks with carving NavMeshObstacles and physical barriers.\nEjected {ejectedCount} enemies to safe ground outside.",
             "OK"
         );
     }
@@ -363,8 +424,8 @@ public class ContainerObstacleManager : MonoBehaviour
 }
 
 /// <summary>
-/// Trigger helper attached to containers to physically catch and instantly eject
-/// any enemy that enters or touches the container volume.
+/// Trigger helper attached to containers and oil tanks to physically catch and instantly eject
+/// any enemy that enters or touches the volume.
 /// </summary>
 public class ContainerEjectionTrigger : MonoBehaviour
 {
@@ -381,7 +442,7 @@ public class ContainerEjectionTrigger : MonoBehaviour
 
             Vector3 safe = ContainerObstacleManager.GetSafePositionOutside(box, enemy.transform.position);
             enemy.WarpTo(safe);
-            Debug.LogWarning($"[ContainerEjectionTrigger] Instantly ejected {enemy.gameObject.name} out of container trigger to {safe}!");
+            Debug.LogWarning($"[ContainerEjectionTrigger] Instantly ejected {enemy.gameObject.name} out of container/tank trigger to {safe}!");
         }
     }
 }

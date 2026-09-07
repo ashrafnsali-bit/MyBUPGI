@@ -343,10 +343,10 @@ public class EnemyAI : MonoBehaviour
 
         EnsureFirePoint();
 
-        // Anti-hiding failsafe: periodically ensure enemy is not inside a container
+        // Anti-hiding failsafe: periodically ensure enemy is not inside a container or tank
         if (Time.time >= nextContainerCheckTime)
         {
-            nextContainerCheckTime = Time.time + 0.5f;
+            nextContainerCheckTime = Time.time + 0.25f;
             EnsureOutsideContainer();
         }
 
@@ -539,10 +539,32 @@ public class EnemyAI : MonoBehaviour
     {
         if (player == null) return false;
         
+        // Enemies inside any container or oil tank CANNOT see or shoot the player
+        if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, 0.2f))
+        {
+            return false;
+        }
+
         Vector3 eyePos = transform.position + Vector3.up * 1.5f;
         Vector3 playerChest = player.position + Vector3.up * 1.0f;
         Vector3 toPlayer = playerChest - eyePos;
         float dist = toPlayer.magnitude;
+
+        // Two-way linecast check: check Player -> Enemy eye position
+        // Single-sided mesh colliders block rays coming from the outside (player side)
+        RaycastHit revHit;
+        if (Physics.Linecast(playerChest, eyePos, out revHit, ~0, QueryTriggerInteraction.Ignore))
+        {
+            if (revHit.transform != transform && !revHit.transform.IsChildOf(transform) && revHit.transform.root != transform)
+            {
+                if (revHit.transform.GetComponentInParent<EnemyAI>() == null && 
+                    revHit.transform.GetComponent<EnemyAI>() == null &&
+                    !revHit.transform.name.Contains("Bullet"))
+                {
+                    return false; // Solid obstacle between player and enemy
+                }
+            }
+        }
 
         RaycastHit[] hits = Physics.RaycastAll(eyePos, toPlayer.normalized, dist, ~0, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
@@ -570,6 +592,11 @@ public class EnemyAI : MonoBehaviour
     void Shoot()
     {
         if (player == null) return;
+        if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, 0.2f))
+        {
+            EnsureOutsideContainer();
+            return;
+        }
         EnsureFirePoint();
 
         SafeSetAnimTrigger(shootTrigger);
