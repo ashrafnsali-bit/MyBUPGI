@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -175,13 +176,7 @@ public class ContainerObstacleManager : MonoBehaviour
         // Must be an industrial dumpster / waste container
         bool isDumpster = name.Contains("dumpster") || rootName.Contains("dumpster");
 
-        // Must be an industrial hangar / shed / warehouse / building
-        bool isHangar = name.Contains("hangar") || rootName.Contains("hangar") ||
-                        name.Contains("shed") || rootName.Contains("shed") ||
-                        name.Contains("warehouse") || rootName.Contains("warehouse") ||
-                        name.Contains("building") || rootName.Contains("building");
-
-        if (!isCargo && !isOilTank && !isDumpster && !isHangar) return false;
+        if (!isCargo && !isOilTank && !isDumpster) return false;
 
         // Must have a 3D mesh or existing renderer
         return go.GetComponent<MeshFilter>() != null || go.GetComponent<Renderer>() != null;
