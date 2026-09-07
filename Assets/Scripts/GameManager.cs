@@ -420,7 +420,8 @@ public class GameManager : MonoBehaviour
         if (player == null) return Vector3.zero;
 
         // Try to find a valid open spawn point between 18m and 35m from player
-        for (int i = 0; i < 30; i++)
+        UnityEngine.AI.NavMeshPath testPath = new UnityEngine.AI.NavMeshPath();
+        for (int i = 0; i < 40; i++)
         {
             float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
             float distance = Random.Range(18f, 35f);
@@ -431,16 +432,21 @@ public class GameManager : MonoBehaviour
             {
                 if (Vector3.Distance(navHit.position, player.position) >= 15f)
                 {
-                    // Ensure the spawn point is NOT inside or near any container
+                    // Ensure the spawn point is NOT inside or near any container, tank, or hangar
                     if (!IsInsideOrNearContainer(navHit.position))
                     {
-                        return navHit.position;
+                        // Ensure candidate position has an unobstructed path to the player
+                        if (UnityEngine.AI.NavMesh.CalculatePath(navHit.position, player.position, UnityEngine.AI.NavMesh.AllAreas, testPath) &&
+                            testPath.status == UnityEngine.AI.NavMeshPathStatus.PathComplete)
+                        {
+                            return navHit.position;
+                        }
                     }
                 }
             }
         }
 
-        // Fallback: spawn at a safe 22m distance in a random direction away from containers and tanks
+        // Fallback: spawn at a safe 22m distance in a random direction away from containers, tanks, and hangars
         for (int i = 0; i < 20; i++)
         {
             float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
@@ -450,7 +456,11 @@ public class GameManager : MonoBehaviour
             {
                 if (!IsInsideOrNearContainer(navHit.position))
                 {
-                    return navHit.position;
+                    if (UnityEngine.AI.NavMesh.CalculatePath(navHit.position, player.position, UnityEngine.AI.NavMesh.AllAreas, testPath) &&
+                        testPath.status == UnityEngine.AI.NavMeshPathStatus.PathComplete)
+                    {
+                        return navHit.position;
+                    }
                 }
             }
         }

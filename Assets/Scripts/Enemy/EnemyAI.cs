@@ -947,12 +947,35 @@ public class EnemyAI : MonoBehaviour
     {
         if (isDead) return;
 
+        // 1. Direct containment check (Container, Tank, Hangar, Shed, etc.)
         BoxCollider container;
         Vector3 safePos;
         if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, out container, out safePos, 0.4f))
         {
             WarpTo(safePos);
-            Debug.LogWarning($"Enemy {gameObject.name} was inside container {(container != null ? container.gameObject.name : "unknown")}! Ejected safely to: {safePos}");
+            Debug.LogWarning($"Enemy {gameObject.name} was inside {(container != null ? container.gameObject.name : "container/tank/hangar")}! Ejected safely to: {safePos}");
+            return;
+        }
+
+        // 2. Reachability failsafe: check if enemy has an unblocked path to the player
+        if (player != null && agent != null && agent.isOnNavMesh)
+        {
+            NavMeshPath path = new NavMeshPath();
+            if (!NavMesh.CalculatePath(transform.position, player.position, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete)
+            {
+                // Enemy cannot reach player (stuck inside an enclosed room/hangar/fence)!
+                Vector3 toPlayer = (player.position - transform.position).normalized;
+                Vector3 candidate = player.position - toPlayer * 16f;
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(candidate, out hit, 10f, NavMesh.AllAreas))
+                {
+                    if (!ContainerObstacleManager.IsPointInsideAnyContainer(hit.position, 1.5f))
+                    {
+                        WarpTo(hit.position);
+                        Debug.LogWarning($"Enemy {gameObject.name} was path-blocked from player! Warped to reachable open ground: {hit.position}");
+                    }
+                }
+            }
         }
     }
 }

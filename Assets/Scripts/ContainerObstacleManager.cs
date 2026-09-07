@@ -175,7 +175,13 @@ public class ContainerObstacleManager : MonoBehaviour
         // Must be an industrial dumpster / waste container
         bool isDumpster = name.Contains("dumpster") || rootName.Contains("dumpster");
 
-        if (!isCargo && !isOilTank && !isDumpster) return false;
+        // Must be an industrial hangar / shed / warehouse / building
+        bool isHangar = name.Contains("hangar") || rootName.Contains("hangar") ||
+                        name.Contains("shed") || rootName.Contains("shed") ||
+                        name.Contains("warehouse") || rootName.Contains("warehouse") ||
+                        name.Contains("building") || rootName.Contains("building");
+
+        if (!isCargo && !isOilTank && !isDumpster && !isHangar) return false;
 
         // Must have a 3D mesh or existing renderer
         return go.GetComponent<MeshFilter>() != null || go.GetComponent<Renderer>() != null;
