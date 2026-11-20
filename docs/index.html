@@ -114,12 +114,17 @@
       }
 
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/docs.loader.js";
+      // Cache-busting: bump this whenever the WebGL build is rebuilt so browsers
+      // never mix an old loader/framework with a new wasm/data file (that mismatch
+      // shows up as "RangeError: Maximum call stack size exceeded at invoke_iii").
+      var buildVersion = "1.1.1";
+      var v = "?v=" + buildVersion;
+      var loaderUrl = buildUrl + "/docs.loader.js" + v;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/docs.data",
-        frameworkUrl: buildUrl + "/docs.framework.js",
-        codeUrl: buildUrl + "/docs.wasm",
+        dataUrl: buildUrl + "/docs.data" + v,
+        frameworkUrl: buildUrl + "/docs.framework.js" + v,
+        codeUrl: buildUrl + "/docs.wasm" + v,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MyBUPGI",
         productName: "MyBUPGI",
