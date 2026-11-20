@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.AI;
+using System.Collections.Generic;
+
 public enum EnemyArchetype { Assaulter, Sniper, Rusher, Tank, Grenadier }
+public enum EnemyState { Patrol, Alert, Investigate, Engage, Reposition, Retreat, Dead }
 
 public class EnemyAI : MonoBehaviour
 {
@@ -10,26 +13,43 @@ public class EnemyAI : MonoBehaviour
     [Header("Stats")]
     public float health = 100;
     private float maxHealth;
-    public float damage = 4; // Balanced damage per bullet
-    public float sightRange = 30f; // Balanced vision range (was 500)
-    public float attackRange = 18f; // Balanced engagement range (was 80)
-    public float attackHysteresis = 4f; // Reasonable hysteresis
+    public float damage = 4;
+    public float sightRange = 30f;
+    public float attackRange = 18f;
+    public float attackHysteresis = 4f;
     public float moveSpeed = 6.0f;
     public float rotationSpeed = 14f;
     public float fireRate = 2.5f;
-    
+
+    [Header("Perception")]
+    [Tooltip("Full cone angle in degrees. Alerted enemies get a wider awareness cone.")]
+    public float fieldOfView = 110f;
+    [Tooltip("Radius within which a moving player can be heard through walls.")]
+    public float hearingRadius = 14f;
+    [Tooltip("Seconds of continuous detection before the enemy commits to an attack.")]
+    public float reactionTime = 0.35f;
+    [Tooltip("How long the enemy remembers the player after losing contact.")]
+    public float memoryDuration = 8f;
+    [Tooltip("How long the enemy searches the last known position before giving up.")]
+    public float searchDuration = 5f;
+
+    [Header("Tactics")]
+    public bool enableHiveMind = true;
+    public float alertRadius = 35f;
+    public float retreatHealthThreshold = 0.18f;
+    [Tooltip("Preferred engagement distance for this archetype.")]
+    public float preferredRange = 16f;
+    [Tooltip("How far a flanking enemy offsets to the side of the player.")]
+    public float flankDistance = 6f;
+    [Tooltip("Radius searched when looking for cover.")]
+    public float coverSearchRadius = 8f;
+    public bool useCover = true;
+
     [Header("Natural Movement")]
-    public float wanderRadius = 12f; 
+    public float wanderRadius = 12f;
     public float wanderWaitTime = 3f;
     private float nextWanderTime;
     private bool isWandering = false;
-
-    [Header("Tactical AI Options")]
-    public bool enableHiveMind = true;
-    public float alertRadius = 25f; // Alert nearby allies within 25m (was 150)
-    public float retreatHealthThreshold = 0.0f;
-    public float dodgeChance = 0.25f;
-    public float dodgeCooldown = 2.0f;
 
     [Header("References")]
     public Transform firePoint;
@@ -42,12 +62,19 @@ public class EnemyAI : MonoBehaviour
 
     [Header("Setup")]
     public float modelYOffset = 0;
-    public bool autoFixHeight = true; // Changed to true by default to prevent sinking
+    public bool autoFixHeight = true;
     public string speedParameter = "Speed";
     public string shootTrigger = "Shoot";
     public string hitTrigger = "Hit";
     public string dieTrigger = "Die";
     public bool useLegacyAnimation = false;
+
+    [Header("Loot")]
+    [Range(0f, 1f)] public float healthDropChance = 1f;
+
+    [Header("Debug")]
+    public bool showDebugOverlay = false;
+    public bool showDebugLines = false;
 
     private NavMeshAgent agent;
     private Animator anim;
@@ -60,231 +87,116 @@ public class EnemyAI : MonoBehaviour
     private bool isDead = false;
     public bool IsDead => isDead;
 
-    public void WarpTo(Vector3 targetPos)
-    {
-        if (agent != null && agent.enabled)
-        {
-            NavMeshHit hit;
-            if (NavMesh.SamplePosition(targetPos, out hit, 8.0f, NavMesh.AllAreas))
-            {
-                agent.Warp(hit.position);
-            }
-            else
-            {
-                agent.Warp(targetPos);
-            }
-        }
-        else
-        {
-            transform.position = targetPos;
-        }
-    }
+    // ---- New tactical AI runtime state ----
+    private EnemyState state = EnemyState.Patrol;
+    public EnemyState State => state;
+    private float stateEnterTime;
+    private float suspicionTimer;
+    private float timeSinceContact = 999f;
+    private float lastPlayerVelocitySample;
+    private Vector3 lastKnownPlayerPosition;
+    private Vector3 tacticalPoint;
+    private int flankSlot;
+    private static readonly List<EnemyAI> activeEnemies = new List<EnemyAI>();
 
+    // ---- Combat runtime state (kept for compatibility) ----
     private bool isCurrentlyAttacking = false;
     private float nextStrafeTime;
-    private Vector3 strafeDestination;
     private bool isReloadingBurst = false;
     private float burstReloadTime;
-    private int burstShotsFired = 0;
-    
-    private float nextDodgeTime;
-    private float flinchEndTime;
-    private float flinchCooldownTime; // Prevent stunlocking
-    private bool isRetreating = false;
+    private int burstShotsFired;
+    private float flinchCooldownTime;
     private bool hasAlertedOthers = false;
     private Vector3 lastPlayerPos;
     private Vector3 playerVelocity;
-
     private float nextGrenadeTime;
     private GameObject enemyGrenadePrefab;
-    private float nextContainerCheckTime = 0f;
+    private float nextContainerCheckTime;
     private bool hasSpottedPlayer = false;
+    private float spawnTime;
+    private float nextPerceptionCheckTime;
+    private bool cachedCanSeePlayer;
 
     void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
         if (agent == null) agent = gameObject.AddComponent<NavMeshAgent>();
-        
-        // AUTO-SETUP: Animator (Recursive Search)
+
         Animator[] anims = GetComponentsInChildren<Animator>();
         foreach (var a in anims)
         {
-            if (a.avatar != null || a.runtimeAnimatorController != null)
-            {
-                anim = a;
-                break;
-            }
+            if (a.avatar != null || a.runtimeAnimatorController != null) { anim = a; break; }
         }
         if (anim == null && anims.Length > 0) anim = anims[0];
 
-        // FALLBACK: Legacy Animation
         legacyAnim = GetComponentInChildren<Animation>();
-        if (legacyAnim != null && (anim == null || anim.runtimeAnimatorController == null)) {
+        if (legacyAnim != null && (anim == null || anim.runtimeAnimatorController == null))
+        {
             useLegacyAnimation = true;
             if (anim != null) anim.enabled = false;
-            
-            foreach (AnimationState state in legacyAnim) {
-                string n = state.name.ToLower();
-                if (n.Contains("idle")) legacyIdle = state.name;
-                if (n.Contains("run") || n.Contains("walk")) legacyRun = state.name;
-            }
-        }
-        
-        // AUTO-SETUP: Weapon
-        var weaponSetup = GetComponent<EnemyWeaponSetup>();
-        if (weaponSetup == null) weaponSetup = gameObject.AddComponent<EnemyWeaponSetup>();
-
-        EnsureFirePoint();
-        EnforceAggressiveStats();
-        maxHealth = health;
-    }
-
-    void EnsureFirePoint()
-    {
-        if (firePoint == null) {
-            var weaponSetup = GetComponent<EnemyWeaponSetup>();
-            if (weaponSetup != null && weaponSetup.firePoint != null) {
-                firePoint = weaponSetup.firePoint;
-            }
-        }
-
-        if (firePoint == null) {
-            Transform existingFp = transform.Find("FirePoint_Auto");
-            if (existingFp != null) {
-                firePoint = existingFp;
-            } else {
-                GameObject fp = new GameObject("FirePoint_Auto");
-                fp.transform.SetParent(transform);
-                fp.transform.localPosition = new Vector3(0.2f, 1.4f, 0.8f);
-                fp.transform.localRotation = Quaternion.identity;
-                firePoint = fp.transform;
-            }
-        }
-    }
-
-    private float spawnTime;
-
-    void Start()
-    {
-        spawnTime = Time.time;
-        FindPlayer();
-        EnsureFirePoint();
-        EnforceAggressiveStats();
-
-        // AUTO-SETUP: Bullet Prefab
-        if (bulletPrefab == null)
-        {
-            bulletPrefab = Resources.Load<GameObject>("Bullet");
-            if (bulletPrefab == null)
+            foreach (AnimationState s in legacyAnim)
             {
-                GenerateFallbackBullet();
+                string n = s.name.ToLower();
+                if (n.Contains("idle")) legacyIdle = s.name;
+                if (n.Contains("run") || n.Contains("walk")) legacyRun = s.name;
             }
         }
 
-        // AUTO-SETUP: Shoot Sound
-        if (shootSound == null)
-        {
-            GunScript[] guns = Resources.FindObjectsOfTypeAll<GunScript>();
-            foreach (var g in guns)
-            {
-                if (g.shoot_sound_source != null && g.shoot_sound_source.clip != null)
-                {
-                    shootSound = g.shoot_sound_source.clip;
-                    break;
-                }
-            }
-        }
-
-        // RIGIDBODY CONFIG: For smoother NavMesh control
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb != null) {
-            rb.isKinematic = true;
-            rb.useGravity = false;
-        }
-
-        // NAVMESH SNAPPING
-        if (agent != null) {
-            NavMeshHit navHit;
-            if (NavMesh.SamplePosition(transform.position, out navHit, 10.0f, NavMesh.AllAreas)) {
-                agent.Warp(navHit.position);
-            }
-        }
-
-        if (autoFixHeight) FixModelHeight();
-        EnsureOutsideContainer();
+        if (GetComponent<EnemyWeaponSetup>() == null) gameObject.AddComponent<EnemyWeaponSetup>();
+        EnsureFirePoint();
+        ApplyArchetype();
     }
 
-    void FindPlayer()
+    void OnEnable()
     {
-        if (player != null) return;
-
-        GameObject p = GameObject.FindGameObjectWithTag("Player");
-        if (p == null) {
-            var playerScript = FindFirstObjectByType<PlayerMovementScript>();
-            if (playerScript != null) p = playerScript.gameObject;
-        }
-        if (p == null) {
-            var playerHealth = FindFirstObjectByType<PlayerHealth>();
-            if (playerHealth != null) p = playerHealth.gameObject;
-        }
-        
-        if (p != null) {
-            player = p.transform;
-        }
+        if (!activeEnemies.Contains(this)) activeEnemies.Add(this);
     }
 
-    private void EnforceAggressiveStats()
+    void OnDisable()
     {
-        // Balanced, responsive combat stats
+        activeEnemies.Remove(this);
+    }
+
+    /// <summary>Re-applies archetype stats. Called after GameManager changes the archetype on a spawned clone.</summary>
+    public void ApplyArchetype()
+    {
         health = Mathf.Max(health, 70f);
-        damage = Mathf.Clamp(damage, 2f, 6f);
-        retreatHealthThreshold = 0f;
+        damage = Mathf.Clamp(damage, 2f, 8f);
+        retreatHealthThreshold = Mathf.Clamp(retreatHealthThreshold, 0f, 0.5f);
 
         switch (archetype)
         {
             case EnemyArchetype.Sniper:
-                damage = 7f;
-                attackRange = 35f;
-                sightRange = 55f;
-                fireRate = 1.0f; 
-                moveSpeed = 5.0f;
+                damage = 7f; attackRange = 35f; sightRange = 55f; fireRate = 1.0f; moveSpeed = 5.0f;
+                fieldOfView = 60f; hearingRadius = 10f; preferredRange = 28f; reactionTime = 0.55f;
+                coverSearchRadius = 10f; flankDistance = 3f;
                 break;
             case EnemyArchetype.Rusher:
-                health = 80f;
-                damage = 2f;
-                attackRange = 14f;
-                sightRange = 45f;
-                moveSpeed = 8.0f;
-                fireRate = 3.8f; 
+                health = 80f; damage = 2f; attackRange = 14f; sightRange = 45f; fireRate = 3.8f; moveSpeed = 8.0f;
+                fieldOfView = 140f; hearingRadius = 20f; preferredRange = 8f; reactionTime = 0.20f;
+                retreatHealthThreshold = 0f; coverSearchRadius = 3f; flankDistance = 4f;
                 break;
             case EnemyArchetype.Tank:
-                health = 150f;
-                damage = 4f;
-                attackRange = 16f;
-                sightRange = 40f;
-                moveSpeed = 4.5f;
-                fireRate = 2.2f;
+                health = 150f; damage = 4f; attackRange = 16f; sightRange = 40f; fireRate = 2.2f; moveSpeed = 4.5f;
+                fieldOfView = 100f; hearingRadius = 12f; preferredRange = 11f; reactionTime = 0.45f;
+                retreatHealthThreshold = 0f; coverSearchRadius = 4f; flankDistance = 2f;
                 break;
             case EnemyArchetype.Grenadier:
-                health = 75f;
-                damage = 3f;
-                attackRange = 20f;
-                sightRange = 45f;
-                moveSpeed = 6.0f;
-                fireRate = 2.5f;
+                health = 75f; damage = 3f; attackRange = 20f; sightRange = 45f; fireRate = 2.5f; moveSpeed = 6.0f;
+                fieldOfView = 110f; hearingRadius = 14f; preferredRange = 17f; reactionTime = 0.35f;
+                coverSearchRadius = 11f; flankDistance = 5f;
                 break;
             case EnemyArchetype.Assaulter:
             default:
-                damage = 3f;
-                attackRange = 22f;
-                sightRange = 48f;
-                moveSpeed = 6.5f;
-                fireRate = 2.8f;
+                damage = 3f; attackRange = 22f; sightRange = 48f; fireRate = 2.8f; moveSpeed = 6.5f;
+                fieldOfView = 110f; hearingRadius = 14f; preferredRange = 15f; reactionTime = 0.30f;
+                coverSearchRadius = 8f; flankDistance = 6f;
                 break;
         }
 
         attackHysteresis = 5f;
         alertRadius = 35f;
+        maxHealth = health;
 
         if (agent != null)
         {
@@ -296,297 +208,573 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+    void EnsureFirePoint()
+    {
+        if (firePoint == null)
+        {
+            var ws = GetComponent<EnemyWeaponSetup>();
+            if (ws != null && ws.firePoint != null) firePoint = ws.firePoint;
+        }
+        if (firePoint == null)
+        {
+            Transform existing = transform.Find("FirePoint_Auto");
+            if (existing != null) firePoint = existing;
+            else
+            {
+                GameObject fp = new GameObject("FirePoint_Auto");
+                fp.transform.SetParent(transform);
+                fp.transform.localPosition = new Vector3(0.2f, 1.4f, 0.8f);
+                fp.transform.localRotation = Quaternion.identity;
+                firePoint = fp.transform;
+            }
+        }
+    }
+
+    void Start()
+    {
+        spawnTime = Time.time;
+        FindPlayer();
+        EnsureFirePoint();
+        ApplyArchetype();
+
+        if (bulletPrefab == null)
+        {
+            bulletPrefab = Resources.Load<GameObject>("Bullet");
+            if (bulletPrefab == null) GenerateFallbackBullet();
+        }
+
+        if (shootSound == null)
+        {
+            foreach (var g in Resources.FindObjectsOfTypeAll<GunScript>())
+            {
+                if (g.shoot_sound_source != null && g.shoot_sound_source.clip != null)
+                {
+                    shootSound = g.shoot_sound_source.clip;
+                    break;
+                }
+            }
+        }
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null) { rb.isKinematic = true; rb.useGravity = false; }
+
+        if (agent != null)
+        {
+            NavMeshHit navHit;
+            if (NavMesh.SamplePosition(transform.position, out navHit, 10f, NavMesh.AllAreas)) agent.Warp(navHit.position);
+        }
+
+        if (autoFixHeight) FixModelHeight();
+        EnsureOutsideContainer();
+
+        lastKnownPlayerPosition = transform.position;
+        tacticalPoint = transform.position;
+        flankSlot = AssignFlankSlot();
+        SetState(EnemyState.Patrol);
+    }
+
+    void FindPlayer()
+    {
+        if (player != null) return;
+        GameObject p = GameObject.FindGameObjectWithTag("Player");
+        if (p == null)
+        {
+            var pm = FindFirstObjectByType<PlayerMovementScript>();
+            if (pm != null) p = pm.gameObject;
+        }
+        if (p == null)
+        {
+            var ph = FindFirstObjectByType<PlayerHealth>();
+            if (ph != null) p = ph.gameObject;
+        }
+        if (p != null) player = p.transform;
+    }
+
     private void GenerateFallbackBullet()
     {
         bulletPrefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         bulletPrefab.name = "FallbackBullet";
         bulletPrefab.transform.localScale = Vector3.one * 0.15f;
-        
         var rb = bulletPrefab.AddComponent<Rigidbody>();
         rb.useGravity = false;
-        
         var bs = bulletPrefab.AddComponent<BulletScript>();
         bs.damage = damage;
-
         var rend = bulletPrefab.GetComponent<Renderer>();
-        if (rend != null) {
+        if (rend != null)
+        {
             rend.material = new Material(Shader.Find("Sprites/Default"));
             rend.material.color = Color.red;
         }
-
         var trail = bulletPrefab.AddComponent<TrailRenderer>();
-        trail.startWidth = 0.15f;
-        trail.endWidth = 0.0f;
-        trail.time = 0.4f;
+        trail.startWidth = 0.15f; trail.endWidth = 0f; trail.time = 0.4f;
         if (rend != null) trail.material = rend.material;
-
         bulletPrefab.SetActive(false);
     }
 
     void Update()
     {
         if (isDead) return;
-        
-        if (transform.position.y < -50f) 
+        if (transform.position.y < -50f) { Die(); return; }
+
+        if (player == null)
         {
-            Die();
-            return;
-        }
-        
-        if (player == null) {
             FindPlayer();
-            if (player == null) {
-                Wander();
-                return;
-            }
+            if (player == null) { Wander(); return; }
         }
 
         EnsureFirePoint();
 
-        // Anti-hiding failsafe: periodically ensure enemy is not inside a container or tank
         if (Time.time >= nextContainerCheckTime)
         {
             nextContainerCheckTime = Time.time + 0.25f;
             EnsureOutsideContainer();
         }
 
-        // TRACK PLAYER VELOCITY FOR PREDICTIVE AIMING
-        if (Time.deltaTime > 0) {
+        if (Time.deltaTime > 0f && lastPlayerPos != Vector3.zero)
             playerVelocity = (player.position - lastPlayerPos) / Time.deltaTime;
-            lastPlayerPos = player.position;
-        }
+        lastPlayerPos = player.position;
 
         float distance = Vector3.Distance(transform.position, player.position);
-        float currentAttackRange = isCurrentlyAttacking ? (attackRange + attackHysteresis) : attackRange;
 
-        // Active visual spotting: if within sight range and has line of sight, spot player immediately!
-        bool canSeePlayer = (distance <= sightRange) && HasLineOfSightToPlayer();
-
-        if (canSeePlayer)
+        // Throttle the expensive line-of-sight raycast to ~10 Hz per enemy.
+        if (Time.time >= nextPerceptionCheckTime)
         {
-            hasSpottedPlayer = true;
-            if (!hasAlertedOthers && enableHiveMind)
-            {
-                AlertNearbyEnemies();
-            }
+            nextPerceptionCheckTime = Time.time + 0.1f;
+            cachedCanSeePlayer = CanSeePlayer(distance);
         }
+        bool sees = cachedCanSeePlayer;
+        bool hears = CanHearPlayer(distance); // cheap distance-only check
 
-        // Behavior decision:
-        if (canSeePlayer && distance <= currentAttackRange)
+        if (sees || hears)
         {
-            // Close enough and visible -> Shoot and strafe!
-            isCurrentlyAttacking = true;
-            Attack();
-        }
-        else if (hasSpottedPlayer || canSeePlayer || hasAlertedOthers)
-        {
-            // Spotted player or alerted -> Aggressively chase to engage! Never stand still!
-            isCurrentlyAttacking = false;
-            Chase();
+            timeSinceContact = 0f;
+            lastKnownPlayerPosition = player.position;
+            suspicionTimer += Time.deltaTime;
         }
         else
         {
-            // Far away and unspotted -> Patrol/Wander
-            isCurrentlyAttacking = false;
-            Wander();
+            timeSinceContact += Time.deltaTime;
+            suspicionTimer = Mathf.Max(0f, suspicionTimer - Time.deltaTime * 1.5f);
         }
+
+        UpdateStateMachine(distance, sees);
+        UpdateAnimation();
     }
 
-    void Wander()
+    // ------------------------------------------------------------------
+    // PERCEPTION
+    // ------------------------------------------------------------------
+
+    bool CanSeePlayer(float distance)
     {
-        if (agent == null || !agent.isOnNavMesh) return;
-        agent.updateRotation = true;
+        if (player == null || distance > sightRange) return false;
 
-        if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
-        {
-            if (isWandering) {
-                isWandering = false;
-                nextWanderTime = Time.time + Random.Range(1.0f, 2.0f); // Shorter active pauses
-            }
+        float cone = hasSpottedPlayer ? Mathf.Min(360f, fieldOfView * 2f) : fieldOfView;
+        Vector3 toPlayer = player.position - transform.position;
+        toPlayer.y = 0f;
+        if (toPlayer.sqrMagnitude > 0.01f && Vector3.Angle(transform.forward, toPlayer) > cone * 0.5f)
+            return false;
 
-            if (Time.time >= nextWanderTime)
-            {
-                Vector3 randomDirection = Random.insideUnitSphere * wanderRadius;
-                randomDirection += transform.position;
-                NavMeshHit hit;
-                if (NavMesh.SamplePosition(randomDirection, out hit, wanderRadius, 1))
-                {
-                    if (!IsInsideOrNearContainer(hit.position))
-                    {
-                        agent.isStopped = false;
-                        agent.SetDestination(hit.position);
-                        isWandering = true;
-                    }
-                }
-            }
-        }
-
-        float speed = agent.velocity.magnitude / moveSpeed;
-        SafeSetAnimFloat(speedParameter, speed * 0.5f, 0.2f);
+        return HasLineOfSightToPlayer();
     }
 
-    void Chase()
+    bool CanHearPlayer(float distance)
     {
-        if (agent != null && agent.isOnNavMesh && player != null)
-        {
-            agent.isStopped = false;
-            agent.speed = moveSpeed;
-            agent.stoppingDistance = 2.5f;
-            agent.updateRotation = true;
-
-            if (Time.time >= nextPathUpdateTime) {
-                agent.SetDestination(player.position);
-                nextPathUpdateTime = Time.time + 0.15f;
-            }
-            
-            float speed = agent.velocity.magnitude / Mathf.Max(moveSpeed, 1f); 
-            SafeSetAnimFloat(speedParameter, Mathf.Max(speed, 0.8f));
-        }
-    }
-
-    void Attack()
-    {
-        if (player == null) return;
-        if (Time.time < spawnTime + 0.3f) return; // Quick 0.3s reaction
-
-        if (agent != null && agent.isOnNavMesh) {
-            agent.updateRotation = false; // Turn manually to track player
-            
-            float distanceToPlayer = Vector3.Distance(transform.position, player.position);
-
-            if (distanceToPlayer > 5.0f)
-            {
-                agent.isStopped = false;
-                agent.speed = moveSpeed;
-                agent.stoppingDistance = 3.0f;
-                agent.SetDestination(player.position);
-            }
-            else
-            {
-                // Active close-quarters combat: strafe left/right, never stand still!
-                if (Time.time >= nextStrafeTime)
-                {
-                    nextStrafeTime = Time.time + Random.Range(1.0f, 2.0f);
-                    Vector3 strafeDir = Vector3.Cross((player.position - transform.position).normalized, Vector3.up);
-                    if (Random.value < 0.5f) strafeDir = -strafeDir;
-                    Vector3 candidatePos = transform.position + strafeDir * Random.Range(2.5f, 4.5f);
-                    NavMeshHit strafeHit;
-                    if (NavMesh.SamplePosition(candidatePos, out strafeHit, 3.0f, NavMesh.AllAreas))
-                    {
-                        if (!IsInsideOrNearContainer(strafeHit.position))
-                        {
-                            agent.isStopped = false;
-                            agent.speed = moveSpeed * 0.75f;
-                            agent.SetDestination(strafeHit.position);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Aim at player
-        Vector3 direction = (player.position - transform.position).normalized;
-        direction.y = 0;
-        if (direction != Vector3.zero)
-        {
-            Quaternion lookRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * 18.0f);
-        }
-
-        float moveVel = (agent != null && !agent.isStopped) ? (agent.velocity.magnitude / moveSpeed) : 0f;
-        SafeSetAnimFloat(speedParameter, Mathf.Max(moveVel, 0.5f));
-
-        Debug.DrawLine(transform.position, player.position, Color.red);
-
-        // TACTICAL BURST FIRING
-        if (isReloadingBurst)
-        {
-            if (Time.time >= burstReloadTime)
-            {
-                isReloadingBurst = false;
-                burstShotsFired = 0;
-            }
-        }
-        else
-        {
-            float actualFireDelay = 1f / Mathf.Max(fireRate, 2.0f);
-            if (Time.time >= lastFireTime + actualFireDelay)
-            {
-                if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime && Random.value < 0.35f)
-                {
-                    ThrowGrenade();
-                    lastFireTime = Time.time;
-                    nextGrenadeTime = Time.time + Random.Range(5f, 8f);
-                }
-                else
-                {
-                    Shoot();
-                    lastFireTime = Time.time;
-                    burstShotsFired++;
-                    
-                    // Sustained burst of 4-7 shots, then brief 0.8s - 1.3s tactical pause
-                    if (burstShotsFired >= Random.Range(4, 7))
-                    {
-                        isReloadingBurst = true;
-                        burstReloadTime = Time.time + Random.Range(0.8f, 1.3f);
-                    }
-                }
-            }
-        }
+        if (player == null) return false;
+        float radius = hearingRadius;
+        var pm = player.GetComponent<PlayerMovementScript>();
+        if (pm != null && pm.currentSpeed > 4f) radius *= 1.7f; // sprinting is louder
+        return distance <= radius;
     }
 
     public bool HasLineOfSightToPlayer()
     {
-        if (player == null) return false;
-        
-        // Enemies inside any container or oil tank CANNOT see or shoot the player
-        if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, 0.2f))
-        {
-            return false;
-        }
+        return HasLineOfSightFrom(transform.position, player != null ? player.position : transform.position);
+    }
 
-        Vector3 eyePos = transform.position + Vector3.up * 1.5f;
-        Vector3 playerChest = player.position + Vector3.up * 1.0f;
-        Vector3 toPlayer = playerChest - eyePos;
-        float dist = toPlayer.magnitude;
+    bool HasLineOfSightFrom(Vector3 from, Vector3 to)
+    {
+        if (ContainerObstacleManager.IsPointInsideAnyContainer(from, 0.2f)) return false;
 
-        // Two-way linecast check: check Player -> Enemy eye position
-        // Single-sided mesh colliders block rays coming from the outside (player side)
-        RaycastHit revHit;
-        if (Physics.Linecast(playerChest, eyePos, out revHit, ~0, QueryTriggerInteraction.Ignore))
-        {
-            if (revHit.transform != transform && !revHit.transform.IsChildOf(transform) && revHit.transform.root != transform)
-            {
-                if (revHit.transform.GetComponentInParent<EnemyAI>() == null && 
-                    revHit.transform.GetComponent<EnemyAI>() == null &&
-                    !revHit.transform.name.Contains("Bullet"))
-                {
-                    return false; // Solid obstacle between player and enemy
-                }
-            }
-        }
+        Vector3 eye = from + Vector3.up * 1.5f;
+        Vector3 chest = to + Vector3.up * 1.0f;
+        Vector3 delta = chest - eye;
+        float dist = delta.magnitude;
+        if (dist < 0.01f) return true;
 
-        RaycastHit[] hits = Physics.RaycastAll(eyePos, toPlayer.normalized, dist, ~0, QueryTriggerInteraction.Ignore);
+        RaycastHit[] hits = Physics.RaycastAll(eye, delta.normalized, dist, ~0, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
 
         foreach (RaycastHit h in hits)
         {
             if (h.transform == transform || h.transform.IsChildOf(transform) || h.transform.root == transform) continue;
-            if (h.transform.GetComponentInParent<EnemyAI>() != null || h.transform.GetComponent<EnemyAI>() != null) continue;
+            if (h.transform.GetComponentInParent<EnemyAI>() != null) continue;
             if (h.collider.isTrigger && !h.transform.CompareTag("Player")) continue;
             if (h.transform.name.Contains("Bullet")) continue;
-
-            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player || h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
-            {
+            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player ||
+                h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
                 return true;
-            }
-
-            // Hit solid wall or obstacle
             return false;
         }
-
-        // No obstacles found between enemy and player
         return true;
+    }
+
+    // ------------------------------------------------------------------
+    // STATE MACHINE
+    // ------------------------------------------------------------------
+
+    void SetState(EnemyState newState)
+    {
+        if (state == newState || state == EnemyState.Dead) return;
+        state = newState;
+        stateEnterTime = Time.time;
+        if (newState == EnemyState.Engage) isCurrentlyAttacking = true;
+        else if (newState != EnemyState.Reposition) isCurrentlyAttacking = false;
+    }
+
+    void UpdateStateMachine(float distance, bool sees)
+    {
+        switch (state)
+        {
+            case EnemyState.Patrol:
+                if (sees && suspicionTimer >= reactionTime)
+                {
+                    if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
+                    SetState(EnemyState.Engage);
+                }
+                else if (suspicionTimer > 0.08f)
+                {
+                    SetState(EnemyState.Alert);
+                }
+                else Wander();
+                break;
+
+            case EnemyState.Alert:
+                StopMovement();
+                FacePosition(lastKnownPlayerPosition, 8f);
+                if (sees && suspicionTimer >= reactionTime) SetState(EnemyState.Engage);
+                else if (Time.time - stateEnterTime > 0.9f) SetState(EnemyState.Investigate);
+                break;
+
+            case EnemyState.Investigate:
+                MoveTo(lastKnownPlayerPosition, moveSpeed * 0.85f, 2.5f, 0.2f);
+                FaceMovementOrTarget(lastKnownPlayerPosition);
+                if (sees && distance <= attackRange + attackHysteresis) SetState(EnemyState.Engage);
+                else if (timeSinceContact > memoryDuration || Time.time - stateEnterTime > searchDuration + memoryDuration)
+                {
+                    ForgetPlayer();
+                    SetState(EnemyState.Patrol);
+                }
+                else if (agent != null && agent.remainingDistance <= 2.5f && !agent.pathPending)
+                {
+                    SearchAround();
+                }
+                break;
+
+            case EnemyState.Engage:
+                if (!sees && timeSinceContact > 1.5f)
+                {
+                    tacticalPoint = lastKnownPlayerPosition;
+                    SetState(EnemyState.Investigate);
+                    break;
+                }
+                if (health / Mathf.Max(maxHealth, 1f) <= retreatHealthThreshold && archetype != EnemyArchetype.Tank)
+                {
+                    SetState(EnemyState.Retreat);
+                    break;
+                }
+                if (ShouldReposition(distance))
+                {
+                    tacticalPoint = ChooseTacticalPoint(distance);
+                    SetState(EnemyState.Reposition);
+                    break;
+                }
+                EngageMovement(distance);
+                FacePosition(player.position, 14f);
+                TryFire();
+                if (showDebugLines) Debug.DrawLine(transform.position, player.position, Color.red);
+                break;
+
+            case EnemyState.Reposition:
+                FacePosition(player.position, 9f);
+                if (sees) TryFire();
+                if (MoveTo(tacticalPoint, moveSpeed, 1.5f, 0.2f) || Time.time - stateEnterTime > 3.5f)
+                    SetState(EnemyState.Engage);
+                break;
+
+            case EnemyState.Retreat:
+                Vector3 away = transform.position - lastKnownPlayerPosition;
+                away.y = 0f;
+                if (away.sqrMagnitude < 0.01f) away = -transform.forward;
+                MoveTo(transform.position + away.normalized * 12f, moveSpeed, 1f, 0.25f);
+                FacePosition(lastKnownPlayerPosition, 7f);
+                if (Time.time - stateEnterTime > 3.5f || timeSinceContact > 2.5f)
+                    SetState(EnemyState.Engage);
+                break;
+        }
+    }
+
+    void ForgetPlayer()
+    {
+        hasSpottedPlayer = false;
+        hasAlertedOthers = false;
+        suspicionTimer = 0f;
+        timeSinceContact = 0f;
+        // Do NOT call ApplyArchetype() here - it would refill health on a wounded enemy.
+    }
+
+    bool ShouldReposition(float distance)
+    {
+        if (Time.time - stateEnterTime < 2.2f) return false;
+        if (Random.value > Time.deltaTime * 0.35f) return false;
+
+        if (archetype == EnemyArchetype.Sniper && distance < preferredRange * 0.6f) return true;
+        if (archetype == EnemyArchetype.Rusher && distance > preferredRange * 1.6f) return true;
+        if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime) return true;
+        if (useCover && !HasLineOfSightFrom(transform.position, player.position)) return true;
+        return Random.value < 0.35f && distance > preferredRange;
+    }
+
+    Vector3 ChooseTacticalPoint(float distance)
+    {
+        if (useCover)
+        {
+            Vector3 cover = FindCoverPoint(player.position);
+            if (cover != transform.position) return cover;
+        }
+
+        Vector3 toPlayer = player.position - transform.position;
+        toPlayer.y = 0f;
+        if (toPlayer.sqrMagnitude < 0.01f) toPlayer = transform.forward;
+        Vector3 side = Vector3.Cross(toPlayer.normalized, Vector3.up);
+        float offset = flankSlot * flankDistance;
+        Vector3 candidate = player.position - toPlayer.normalized * preferredRange + side * offset;
+        return SnapToNavMesh(candidate, 8f);
+    }
+
+    Vector3 FindCoverPoint(Vector3 threat)
+    {
+        Vector3 best = transform.position;
+        float bestScore = -1f;
+        for (int i = 0; i < 10; i++)
+        {
+            float a = i * Mathf.PI * 2f / 10f + Random.Range(-0.25f, 0.25f);
+            Vector3 candidate = transform.position +
+                new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * coverSearchRadius;
+            NavMeshHit nh;
+            if (!NavMesh.SamplePosition(candidate, out nh, 2.5f, NavMesh.AllAreas)) continue;
+            if (IsInsideOrNearContainer(nh.position)) continue;
+
+            bool blocked = !HasLineOfSightFrom(nh.position, threat);
+            float dist = Vector3.Distance(nh.position, threat);
+            float score = (blocked ? 2.5f : 0f) - Mathf.Abs(dist - preferredRange) * 0.06f;
+            if (score > bestScore) { bestScore = score; best = nh.position; }
+        }
+        return best;
+    }
+
+    int AssignFlankSlot()
+    {
+        int[] counts = new int[3];
+        for (int i = activeEnemies.Count - 1; i >= 0; i--)
+        {
+            if (activeEnemies[i] == null) { activeEnemies.RemoveAt(i); continue; }
+            if (activeEnemies[i].state == EnemyState.Engage || activeEnemies[i].state == EnemyState.Reposition)
+                counts[activeEnemies[i].flankSlot + 1]++;
+        }
+        int min = Mathf.Min(counts[0], counts[1], counts[2]);
+        if (min == counts[0]) return -1;
+        if (min == counts[2]) return 1;
+        return 0;
+    }
+
+    // ------------------------------------------------------------------
+    // MOVEMENT
+    // ------------------------------------------------------------------
+
+    void Wander()
+    {
+        if (agent == null || !agent.isOnNavMesh) return;
+
+        if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
+        {
+            if (isWandering)
+            {
+                isWandering = false;
+                nextWanderTime = Time.time + Random.Range(wanderWaitTime * 0.6f, wanderWaitTime);
+            }
+            if (Time.time >= nextWanderTime)
+            {
+                Vector3 randomDir = Random.insideUnitSphere * wanderRadius;
+                randomDir.y = 0f;
+                Vector3 dest = SnapToNavMesh(transform.position + randomDir, wanderRadius);
+                if (dest != transform.position && !IsInsideOrNearContainer(dest))
+                {
+                    agent.isStopped = false;
+                    agent.speed = moveSpeed * 0.45f;
+                    if (Time.time >= nextPathUpdateTime)
+                    {
+                        agent.SetDestination(dest);
+                        nextPathUpdateTime = Time.time + 0.3f;
+                    }
+                    isWandering = true;
+                }
+            }
+        }
+    }
+
+    bool MoveTo(Vector3 destination, float speed, float stopDistance, float pathInterval)
+    {
+        if (agent == null || !agent.isOnNavMesh) return false;
+        Vector3 dest = SnapToNavMesh(destination, 8f);
+        agent.isStopped = false;
+        agent.speed = speed;
+        agent.stoppingDistance = stopDistance;
+        if (Time.time >= nextPathUpdateTime)
+        {
+            agent.SetDestination(dest);
+            nextPathUpdateTime = Time.time + pathInterval;
+        }
+        return !agent.pathPending && agent.remainingDistance <= stopDistance + 0.2f;
+    }
+
+    void MoveToValid(Vector3 destination, float speed)
+    {
+        MoveTo(destination, speed, 1f, 0.25f);
+    }
+
+    void StopMovement()
+    {
+        if (agent == null || !agent.isOnNavMesh) return;
+        agent.isStopped = true;
+        agent.ResetPath();
+    }
+
+    void EngageMovement(float distance)
+    {
+        if (agent == null || !agent.isOnNavMesh) return;
+        agent.isStopped = false;
+
+        if (distance > preferredRange * 1.15f)
+        {
+            // Close the gap but keep a steady path refresh rate (no per-frame recompute).
+            agent.speed = moveSpeed;
+            agent.stoppingDistance = preferredRange * 0.8f;
+            if (Time.time >= nextPathUpdateTime)
+            {
+                agent.SetDestination(player.position);
+                nextPathUpdateTime = Time.time + 0.18f;
+            }
+        }
+        else if (distance < preferredRange * 0.6f && archetype != EnemyArchetype.Rusher)
+        {
+            // Back off to the preferred range instead of standing inside the player's face.
+            Vector3 away = transform.position - player.position;
+            away.y = 0f;
+            agent.speed = moveSpeed * 0.8f;
+            if (Time.time >= nextPathUpdateTime)
+            {
+                agent.SetDestination(SnapToNavMesh(transform.position + away.normalized * 5f, 6f));
+                nextPathUpdateTime = Time.time + 0.3f;
+            }
+        }
+        else
+        {
+            // Strafe around the player, using cover when available.
+            if (Time.time >= nextStrafeTime)
+            {
+                nextStrafeTime = Time.time + Random.Range(0.9f, 1.8f);
+                Vector3 tangent = Vector3.Cross((player.position - transform.position).normalized, Vector3.up);
+                if (flankSlot < 0) tangent = -tangent;
+                if (Random.value < 0.25f) tangent = -tangent;
+
+                Vector3 candidate = transform.position + tangent * Random.Range(3f, 5.5f);
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(candidate, out hit, 3f, NavMesh.AllAreas) &&
+                    !IsInsideOrNearContainer(hit.position))
+                {
+                    agent.speed = moveSpeed * 0.7f;
+                    agent.SetDestination(hit.position);
+                }
+            }
+        }
+    }
+
+    void SearchAround()
+    {
+        if (Time.time < nextPathUpdateTime) return;
+        nextPathUpdateTime = Time.time + Random.Range(1.2f, 2.2f);
+        Vector3 p = lastKnownPlayerPosition + Random.insideUnitSphere * 6f;
+        p.y = 0f;
+        MoveTo(p, moveSpeed * 0.6f, 1.5f, 999f);
+    }
+
+    Vector3 SnapToNavMesh(Vector3 point, float radius)
+    {
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(point, out hit, radius, NavMesh.AllAreas)) return hit.position;
+        return transform.position;
+    }
+
+    void FacePosition(Vector3 target, float speed)
+    {
+        Vector3 dir = target - transform.position;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.01f) return;
+        Quaternion wanted = Quaternion.LookRotation(dir.normalized);
+        transform.rotation = Quaternion.Slerp(transform.rotation, wanted, Time.deltaTime * Mathf.Max(speed, rotationSpeed));
+    }
+
+    void FaceMovementOrTarget(Vector3 fallback)
+    {
+        if (agent != null && agent.hasPath && agent.velocity.sqrMagnitude > 0.2f)
+            FacePosition(transform.position + agent.velocity, 8f);
+        else
+            FacePosition(fallback, 8f);
+    }
+
+    void UpdateAnimation()
+    {
+        float speed = 0f;
+        if (agent != null && agent.isOnNavMesh)
+            speed = Mathf.Clamp01(agent.velocity.magnitude / Mathf.Max(moveSpeed, 1f));
+        SafeSetAnimFloat(speedParameter, speed, 0.15f);
+    }
+
+    // ------------------------------------------------------------------
+    // COMBAT
+    // ------------------------------------------------------------------
+
+    void TryFire()
+    {
+        if (Time.time < spawnTime + 0.3f) return;
+        if (isReloadingBurst && Time.time < burstReloadTime) return;
+
+        if (isReloadingBurst)
+        {
+            isReloadingBurst = false;
+            burstShotsFired = 0;
+        }
+
+        float actualFireDelay = 1f / Mathf.Max(fireRate, 0.5f);
+        if (Time.time < lastFireTime + actualFireDelay) return;
+
+        if (archetype == EnemyArchetype.Grenadier && Time.time >= nextGrenadeTime && Random.value < 0.35f)
+        {
+            ThrowGrenade();
+            lastFireTime = Time.time;
+            nextGrenadeTime = Time.time + Random.Range(5f, 8f);
+            return;
+        }
+
+        Shoot();
+        lastFireTime = Time.time;
+        burstShotsFired++;
+        if (burstShotsFired >= Random.Range(4, 7))
+        {
+            isReloadingBurst = true;
+            burstReloadTime = Time.time + Random.Range(0.8f, 1.3f);
+        }
     }
 
     void Shoot()
@@ -598,13 +786,11 @@ public class EnemyAI : MonoBehaviour
             return;
         }
         EnsureFirePoint();
-
         SafeSetAnimTrigger(shootTrigger);
-        
         if (shootSound != null) AudioSource.PlayClipAtPoint(shootSound, transform.position);
-        
-        Vector3 spawnPos = (firePoint != null) ? firePoint.position : (transform.position + Vector3.up * 1.4f + transform.forward * 0.5f);
-        Quaternion spawnRot = (firePoint != null) ? firePoint.rotation : transform.rotation;
+
+        Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position + Vector3.up * 1.4f + transform.forward * 0.5f;
+        Quaternion spawnRot = firePoint != null ? firePoint.rotation : transform.rotation;
 
         if (muzzleFlash != null)
         {
@@ -612,92 +798,58 @@ public class EnemyAI : MonoBehaviour
             Destroy(flash, 0.05f);
         }
 
-        Vector3 targetPos = player.position + Vector3.up * 1.0f;
-        Vector3 baseDir = (targetPos - spawnPos).normalized;
+        Vector3 target = player.position + Vector3.up * 1.0f;
 
-        // Balanced bullet spread: depends on archetype and player movement
-        float spreadAmount = 0.05f;
-        switch (archetype)
-        {
-            case EnemyArchetype.Sniper:
-                spreadAmount = 0.015f;
-                break;
-            case EnemyArchetype.Rusher:
-                spreadAmount = 0.08f;
-                break;
-            case EnemyArchetype.Tank:
-                spreadAmount = 0.065f;
-                break;
-            case EnemyArchetype.Assaulter:
-            default:
-                spreadAmount = 0.045f;
-                break;
-        }
+        // Predictive aim: lead the player by a fraction of the bullet flight time.
+        float flight = Vector3.Distance(spawnPos, target) / Mathf.Max(bulletSpeed, 1f);
+        target += playerVelocity * Mathf.Clamp(flight, 0f, 0.35f) * 0.7f;
 
-        // Dodging reward: if player is sprinting/dodging, increase spread so bullets miss
-        if (playerVelocity.magnitude > 1.2f)
-        {
-            spreadAmount += 0.025f;
-        }
+        Vector3 baseDir = (target - spawnPos).normalized;
+        float spread = archetype == EnemyArchetype.Sniper ? 0.015f :
+                       archetype == EnemyArchetype.Rusher ? 0.08f :
+                       archetype == EnemyArchetype.Tank ? 0.065f : 0.045f;
+        if (playerVelocity.magnitude > 1.2f) spread += 0.02f;
 
-        Vector3 fireDirection = baseDir + new Vector3(
-            Random.Range(-spreadAmount, spreadAmount), 
-            Random.Range(-spreadAmount, spreadAmount), 
-            Random.Range(-spreadAmount, spreadAmount)
-        );
-        fireDirection.Normalize();
+        // View-consistent spread (right/up of the shot direction, not world axes).
+        Vector3 right = Vector3.Cross(baseDir, Vector3.up).normalized;
+        if (right.sqrMagnitude < 0.01f) right = transform.right;
+        Vector3 up = Vector3.Cross(right, baseDir).normalized;
+        Vector3 fireDirection = (baseDir + right * Random.Range(-spread, spread) +
+                                 up * Random.Range(-spread, spread)).normalized;
 
-        Quaternion fireRotation = Quaternion.LookRotation(fireDirection);
-
-        // 1. VISUAL BULLET
         if (bulletPrefab != null)
         {
-            GameObject bullet = Instantiate(bulletPrefab, spawnPos, fireRotation);
-            bullet.SetActive(true); 
+            GameObject bullet = Instantiate(bulletPrefab, spawnPos, Quaternion.LookRotation(fireDirection));
+            bullet.SetActive(true);
             Rigidbody rb = bullet.GetComponent<Rigidbody>();
             if (rb != null) rb.linearVelocity = fireDirection * bulletSpeed;
-            
             BulletScript bs = bullet.GetComponent<BulletScript>();
-            if (bs != null) {
-                bs.damage = 0; // Visual bullet; raycast below applies fair synchronized damage
-                bs.isEnemyBullet = true; 
+            if (bs != null)
+            {
+                bs.damage = 0f; // damage is applied by the synchronized raycast below
+                bs.isEnemyBullet = true;
                 bs.owner = gameObject;
             }
         }
 
-        // 2. FAIR HIT DETECTION ALONG SPREAD TRAJECTORY (Allows player to dodge)
-        Vector3 rayOrigin = spawnPos;
-        float maxBulletDist = attackRange + attackHysteresis + 3.0f;
-
-        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, fireDirection, maxBulletDist, ~0, QueryTriggerInteraction.Ignore);
+        float maxDist = attackRange + attackHysteresis + 3f;
+        RaycastHit[] hits = Physics.RaycastAll(spawnPos, fireDirection, maxDist, ~0, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
         foreach (RaycastHit h in hits)
         {
-            // Ignore shooter itself and all its limbs/weapons
             if (h.transform == transform || h.transform.IsChildOf(transform) || h.transform.root == transform) continue;
-            
-            // Ignore other enemies
-            if (h.transform.GetComponentInParent<EnemyAI>() != null || h.transform.GetComponent<EnemyAI>() != null) continue;
-            
-            // Ignore triggers and bullets
+            if (h.transform.GetComponentInParent<EnemyAI>() != null) continue;
             if (h.collider.isTrigger && !h.transform.CompareTag("Player")) continue;
             if (h.transform.name.Contains("Bullet")) continue;
 
-            // If we reached the player or any player child collider:
-            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player || h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
+            if (h.transform == player || h.transform.IsChildOf(player) || h.transform.root == player ||
+                h.transform.CompareTag("Player") || h.transform.GetComponentInParent<PlayerHealth>() != null)
             {
-                PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-                if (playerHealth == null) playerHealth = player.GetComponentInParent<PlayerHealth>();
-                if (playerHealth == null) playerHealth = Object.FindFirstObjectByType<PlayerHealth>();
-                if (playerHealth != null)
-                {
-                    playerHealth.TakeDamage(damage, transform.position);
-                }
-                break;
+                PlayerHealth ph = player.GetComponent<PlayerHealth>();
+                if (ph == null) ph = player.GetComponentInParent<PlayerHealth>();
+                if (ph == null) ph = FindFirstObjectByType<PlayerHealth>();
+                if (ph != null) ph.TakeDamage(damage, transform.position);
             }
-
-            // Hit a solid wall / obstacle - bullet is blocked
             break;
         }
     }
@@ -705,7 +857,7 @@ public class EnemyAI : MonoBehaviour
     void ThrowGrenade()
     {
         SafeSetAnimTrigger(shootTrigger);
-        
+
         if (enemyGrenadePrefab == null)
         {
             enemyGrenadePrefab = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -713,63 +865,56 @@ public class EnemyAI : MonoBehaviour
             enemyGrenadePrefab.transform.localScale = Vector3.one * 0.2f;
             var rend = enemyGrenadePrefab.GetComponent<Renderer>();
             if (rend != null) rend.material.color = Color.black;
-            
-            var rb = enemyGrenadePrefab.AddComponent<Rigidbody>();
-            var col = enemyGrenadePrefab.GetComponent<SphereCollider>();
-            if (col == null) col = enemyGrenadePrefab.AddComponent<SphereCollider>();
-            
-            var gScript = enemyGrenadePrefab.AddComponent<Grenade>();
-            gScript.explosionDamage = 45f;
-            gScript.explosionRadius = 4.5f;
-            gScript.delay = 2.5f;
-            
+            if (enemyGrenadePrefab.GetComponent<Rigidbody>() == null) enemyGrenadePrefab.AddComponent<Rigidbody>();
+            if (enemyGrenadePrefab.GetComponent<SphereCollider>() == null) enemyGrenadePrefab.AddComponent<SphereCollider>();
+
+            Grenade g = enemyGrenadePrefab.AddComponent<Grenade>();
+            g.explosionDamage = 45f;
+            g.explosionRadius = 4.5f;
+            g.delay = 2.5f;
+            g.hurtsEnemies = false; // no friendly fire
+            g.owner = gameObject;
             enemyGrenadePrefab.SetActive(false);
         }
 
-        Vector3 spawnPos = (firePoint != null) ? firePoint.position : (transform.position + Vector3.up * 1.5f + transform.forward);
+        Vector3 spawnPos = firePoint != null ? firePoint.position : transform.position + Vector3.up * 1.5f + transform.forward;
         GameObject grenade = Instantiate(enemyGrenadePrefab, spawnPos, transform.rotation);
         grenade.SetActive(true);
-        
         Rigidbody grb = grenade.GetComponent<Rigidbody>();
         if (grb != null && player != null)
         {
-            Vector3 direction = (player.position - spawnPos);
-            float distance = direction.magnitude;
-            Vector3 force = direction.normalized * Mathf.Min(distance * 0.8f, 15f) + Vector3.up * 5f;
-            grb.AddForce(force, ForceMode.Impulse);
+            Vector3 dir = player.position - spawnPos;
+            float d = dir.magnitude;
+            grb.AddForce(dir.normalized * Mathf.Min(d * 0.8f, 15f) + Vector3.up * 5f, ForceMode.Impulse);
             grb.AddTorque(Random.insideUnitSphere * 10f, ForceMode.Impulse);
         }
     }
 
+    // ------------------------------------------------------------------
+    // DAMAGE / ALERTS / DEATH
+    // ------------------------------------------------------------------
+
     public void TakeDamage(float amount)
     {
-        if (isDead) return;
-        Debug.Log(">>> Enemy " + gameObject.name + " HIT! Damage: " + amount + " Health: " + health + " -> " + (health - amount));
-        
-        // ANTI-STUNLOCK (FLINCH MECHANIC): No longer slows them down. Only applies minor visual knockback if hit extremely hard.
-        if (amount >= 25f && health > amount && Time.time > flinchCooldownTime)
+        if (isDead || amount <= 0f) return;
+
+        if (amount >= 25f && health > amount && Time.time > flinchCooldownTime && agent != null && agent.isOnNavMesh)
         {
-            flinchCooldownTime = Time.time + 3.0f; 
-            
-            if (agent != null && agent.isOnNavMesh) 
+            flinchCooldownTime = Time.time + 3f;
+            if (player != null)
             {
-                if (player != null) {
-                    Vector3 knockbackDir = (transform.position - player.position).normalized;
-                    knockbackDir.y = 0;
-                    agent.Move(knockbackDir * 0.2f); // Very minor physical Knockback
-                }
+                Vector3 kb = (transform.position - player.position).normalized;
+                kb.y = 0f;
+                agent.Move(kb * 0.2f);
             }
         }
-        
+
         health -= amount;
-        
-        // Removed SafeSetAnimTrigger(hitTrigger) completely! 
-        // Playing the Hit animation forces the enemy to stop shooting and looks like they are surrendering.
-        
+        if (player != null) lastKnownPlayerPosition = player.position;
         hasSpottedPlayer = true;
-        // Alert others if shot from afar
+        suspicionTimer = Mathf.Max(suspicionTimer, reactionTime);
         if (!hasAlertedOthers && enableHiveMind) AlertNearbyEnemies();
-        
+
         if (health <= 0) Die();
     }
 
@@ -781,23 +926,22 @@ public class EnemyAI : MonoBehaviour
         {
             EnemyAI ally = col.GetComponentInParent<EnemyAI>();
             if (ally != null && ally != this && !ally.isDead)
-            {
-                ally.ReceiveAlert(player);
-            }
+                ally.ReceiveAlert(player, lastKnownPlayerPosition);
         }
     }
 
     public void ReceiveAlert(Transform targetPlayer)
     {
+        ReceiveAlert(targetPlayer, targetPlayer != null ? targetPlayer.position : transform.position);
+    }
+
+    public void ReceiveAlert(Transform targetPlayer, Vector3 position)
+    {
         if (isDead || targetPlayer == null) return;
         if (player == null) player = targetPlayer;
-        hasAlertedOthers = true; // Prevent infinite alert loops
-        hasSpottedPlayer = true;
-        
-        float distToTarget = Vector3.Distance(transform.position, player.position);
-        if (distToTarget <= alertRadius * 2.0f) {
-            sightRange = Mathf.Max(sightRange, Mathf.Min(distToTarget + 10f, 55f));
-        }
+        lastKnownPlayerPosition = position;
+        suspicionTimer = Mathf.Max(suspicionTimer, reactionTime * 0.6f);
+        if (state == EnemyState.Patrol) SetState(EnemyState.Alert);
     }
 
     void Die()
@@ -805,20 +949,17 @@ public class EnemyAI : MonoBehaviour
         if (isDead) return;
         isDead = true;
         isCurrentlyAttacking = false;
+        SetState(EnemyState.Dead);
+        activeEnemies.Remove(this);
 
         if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
         SafeSetAnimTrigger(dieTrigger);
         if (deathEffect != null) Instantiate(deathEffect, transform.position, transform.rotation);
-        
-        // Notify GameManager
-        if (GameManager.instance != null) GameManager.instance.EnemyDied();
 
-        // Trigger Vampiric Heal for Player
+        if (GameManager.instance != null) GameManager.instance.EnemyDied();
         if (PlayerAbilities.instance != null) PlayerAbilities.instance.OnEnemyKilled();
 
-        // 100% chance to drop a health pickup so you can easily find it
-        DropHealthPickup();
-
+        if (Random.value <= healthDropChance) DropHealthPickup();
         Destroy(gameObject, destroyDelay);
     }
 
@@ -827,115 +968,30 @@ public class EnemyAI : MonoBehaviour
         GameObject pickup = GameObject.CreatePrimitive(PrimitiveType.Cube);
         pickup.name = "HealthPickup";
         pickup.transform.position = transform.position + Vector3.up * 1.5f;
-        pickup.transform.localScale = new Vector3(0.6f, 0.6f, 0.6f);
-        
+        pickup.transform.localScale = Vector3.one * 0.6f;
         var rend = pickup.GetComponent<Renderer>();
-        if (rend != null) {
-            rend.material.color = Color.green; // Green box for health
-        }
-        
-        // Add Rigidbody so it drops to the ground
+        if (rend != null) rend.material.color = Color.green;
         var rb = pickup.AddComponent<Rigidbody>();
         rb.mass = 1f;
-        
-        // Add trigger collider for the player to touch
         var sc = pickup.AddComponent<SphereCollider>();
         sc.isTrigger = true;
-        sc.radius = 2.0f; // Increased radius to ensure player hits it
-        
-        var healScript = pickup.AddComponent<HealthPickup>();
-        healScript.healAmount = 35f;
+        sc.radius = 2f;
+        pickup.AddComponent<HealthPickup>().healAmount = 35f;
     }
 
-    private void FixModelHeight()
-    {
-        // Smart Height Fix using NavMeshAgent.baseOffset to prevent breaking Humanoid Animators
-        if (agent == null) return;
-        
-        foreach (Transform child in transform) {
-            // Find the child that has the visuals
-            if (child.GetComponent<Animator>() != null || child.name.ToLower().Contains("mesh")) {
-                Renderer[] renderers = child.GetComponentsInChildren<Renderer>();
-                if (renderers.Length > 0) {
-                    Bounds b = renderers[0].bounds;
-                    foreach(var r in renderers) b.Encapsulate(r.bounds);
-                    
-                    // If the lowest point of the model is below the root's Y position
-                    if (b.min.y < transform.position.y - 0.1f) {
-                        float diff = transform.position.y - b.min.y;
-                        // Lift the entire agent visually using baseOffset!
-                        agent.baseOffset += (diff + modelYOffset);
-                    } else if (modelYOffset != 0) {
-                        agent.baseOffset += modelYOffset;
-                    }
-                }
-                break; // Only check the main visual child
-            }
-        }
-    }
+    // ------------------------------------------------------------------
+    // HELPERS (unchanged public API)
+    // ------------------------------------------------------------------
 
-    private void SafeSetAnimFloat(string param, float value, float dampTime = 0f)
+    public void WarpTo(Vector3 targetPos)
     {
-        if (useLegacyAnimation && legacyAnim != null)
+        if (agent != null && agent.enabled)
         {
-            if (param == speedParameter)
-            {
-                if (value > 0.1f)
-                    legacyAnim.CrossFade(legacyRun, 0.2f);
-                else
-                    legacyAnim.CrossFade(legacyIdle, 0.2f);
-            }
-            return;
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(targetPos, out hit, 8f, NavMesh.AllAreas)) agent.Warp(hit.position);
+            else agent.Warp(targetPos);
         }
-
-        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
-        try { 
-            if (dampTime > 0)
-                anim.SetFloat(param, value, dampTime, Time.deltaTime);
-            else
-                anim.SetFloat(param, value); 
-        } catch { }
-    }
-
-    private void SafeSetAnimTrigger(string param)
-    {
-        if (useLegacyAnimation && legacyAnim != null) return; // Legacy doesn't use triggers
-
-        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
-        try { anim.SetTrigger(param); } catch { }
-    }
-
-    void OnGUI()
-    {
-        // Display Enemy Health and Status above head
-        if (Camera.main == null || isDead) return;
-
-        Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 2.2f);
-        if (screenPos.z > 0 && Vector3.Distance(transform.position, Camera.main.transform.position) < 30)
-        {
-            float barWidth = 120;
-            float barHeight = 15;
-            float x = screenPos.x - barWidth / 2;
-            float y = Screen.height - screenPos.y;
-
-            // Background
-            GUI.color = new Color(0, 0, 0, 0.5f);
-            GUI.DrawTexture(new Rect(x, y, barWidth, barHeight + 20), Texture2D.whiteTexture);
-
-            // Health Bar
-            GUI.color = Color.red;
-            float fill = Mathf.Clamp01(health / maxHealth); 
-            GUI.DrawTexture(new Rect(x + 2, y + 2, (barWidth - 4) * fill, barHeight - 4), Texture2D.whiteTexture);
-
-            // STATUS TEXT: Helps troubleshoot movement issues
-            string stateName = isCurrentlyAttacking ? "ATTACK" : (agent.velocity.magnitude > 0.1f ? "CHASE" : "IDLE/WANDER");
-            if (isRetreating) stateName = "RETREATING";
-            if (Time.time < flinchEndTime) stateName = "FLINCHED";
-            
-            string navStatus = (agent != null && agent.isOnNavMesh) ? "ON NAVMESH" : "OFF NAVMESH";
-            GUI.color = (agent != null && agent.isOnNavMesh) ? Color.white : Color.yellow;
-            GUI.Label(new Rect(x + 5, y + barHeight, barWidth, 20), $"[{stateName}] {navStatus}");
-        }
+        else transform.position = targetPos;
     }
 
     public bool IsInsideOrNearContainer(Vector3 pos)
@@ -947,36 +1003,93 @@ public class EnemyAI : MonoBehaviour
     {
         if (isDead) return;
 
-        // 1. Direct containment check (Container, Tank, Hangar, Shed, etc.)
         BoxCollider container;
         Vector3 safePos;
         if (ContainerObstacleManager.IsPointInsideAnyContainer(transform.position, out container, out safePos, 0.4f))
         {
             WarpTo(safePos);
-            Debug.LogWarning($"Enemy {gameObject.name} was inside {(container != null ? container.gameObject.name : "container/tank/hangar")}! Ejected safely to: {safePos}");
             return;
         }
 
-        // 2. Reachability failsafe: check if enemy has an unblocked path to the player
         if (player != null && agent != null && agent.isOnNavMesh)
         {
             NavMeshPath path = new NavMeshPath();
-            if (!NavMesh.CalculatePath(transform.position, player.position, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete)
+            if (!NavMesh.CalculatePath(transform.position, player.position, NavMesh.AllAreas, path) ||
+                path.status != NavMeshPathStatus.PathComplete)
             {
-                // Enemy cannot reach player (stuck inside an enclosed room/hangar/fence)!
                 Vector3 toPlayer = (player.position - transform.position).normalized;
                 Vector3 candidate = player.position - toPlayer * 16f;
                 NavMeshHit hit;
-                if (NavMesh.SamplePosition(candidate, out hit, 10f, NavMesh.AllAreas))
-                {
-                    if (!ContainerObstacleManager.IsPointInsideAnyContainer(hit.position, 1.5f))
-                    {
-                        WarpTo(hit.position);
-                        Debug.LogWarning($"Enemy {gameObject.name} was path-blocked from player! Warped to reachable open ground: {hit.position}");
-                    }
-                }
+                if (NavMesh.SamplePosition(candidate, out hit, 10f, NavMesh.AllAreas) &&
+                    !ContainerObstacleManager.IsPointInsideAnyContainer(hit.position, 1.5f))
+                    WarpTo(hit.position);
             }
         }
     }
-}
 
+    private void FixModelHeight()
+    {
+        if (agent == null) return;
+        foreach (Transform child in transform)
+        {
+            if (child.GetComponent<Animator>() != null || child.name.ToLower().Contains("mesh"))
+            {
+                Renderer[] renderers = child.GetComponentsInChildren<Renderer>();
+                if (renderers.Length > 0)
+                {
+                    Bounds b = renderers[0].bounds;
+                    foreach (var r in renderers) b.Encapsulate(r.bounds);
+                    if (b.min.y < transform.position.y - 0.1f)
+                        agent.baseOffset += (transform.position.y - b.min.y + modelYOffset);
+                    else if (modelYOffset != 0f)
+                        agent.baseOffset += modelYOffset;
+                }
+                break;
+            }
+        }
+    }
+
+    private void SafeSetAnimFloat(string param, float value, float damp = 0f)
+    {
+        if (useLegacyAnimation && legacyAnim != null)
+        {
+            if (param == speedParameter)
+                legacyAnim.CrossFade(value > 0.1f ? legacyRun : legacyIdle, 0.2f);
+            return;
+        }
+        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
+        try
+        {
+            if (damp > 0f) anim.SetFloat(param, value, damp, Time.deltaTime);
+            else anim.SetFloat(param, value);
+        }
+        catch { }
+    }
+
+    private void SafeSetAnimTrigger(string param)
+    {
+        if (useLegacyAnimation && legacyAnim != null) return;
+        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null) return;
+        try { anim.SetTrigger(param); } catch { }
+    }
+
+#if UNITY_EDITOR
+    void OnGUI()
+    {
+        if (!showDebugOverlay || Camera.main == null || isDead) return;
+        Vector3 sp = Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 2.2f);
+        if (sp.z <= 0f || Vector3.Distance(transform.position, Camera.main.transform.position) > 30f) return;
+
+        float w = 120f;
+        float x = sp.x - w / 2f;
+        float y = Screen.height - sp.y;
+        GUI.color = new Color(0f, 0f, 0f, 0.5f);
+        GUI.DrawTexture(new Rect(x, y, w, 35f), Texture2D.whiteTexture);
+        GUI.color = Color.red;
+        float fill = Mathf.Clamp01(health / Mathf.Max(maxHealth, 1f));
+        GUI.DrawTexture(new Rect(x + 2f, y + 2f, (w - 4f) * fill, 12f), Texture2D.whiteTexture);
+        GUI.color = state == EnemyState.Engage ? Color.yellow : Color.white;
+        GUI.Label(new Rect(x + 4f, y + 16f, w, 18f), state.ToString());
+    }
+#endif
+}

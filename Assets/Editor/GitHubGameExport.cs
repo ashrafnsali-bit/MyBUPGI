@@ -27,6 +27,12 @@ public static class GitHubGameExport
         BuildWebGLInternal(false);
     }
 
+    /// <summary>Headless sanity check: compiles all scripts without building. Logs a marker on success.</summary>
+    public static void CompileCheck()
+    {
+        Debug.Log("[GitHubGameExport] COMPILE_CHECK_OK");
+    }
+
     private static void BuildWebGLInternal(bool showDialog)
     {
         if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.WebGL, BuildTarget.WebGL))

@@ -75,6 +75,11 @@ public class PlayerHealth : MonoBehaviour
     {
         if (isDead) return; 
 
+        // Visual-only enemy tracer bullets call TakeDamage(0). Ignore them: otherwise they
+        // consume the damage cooldown and trigger phantom hit flashes/camera shake, which
+        // can grant brief invulnerability to real hits.
+        if (amount <= 0f) return;
+
         // Spawn protection grace period (1 second at start of level)
         if (Time.time < spawnTime + 1.0f) return;
 

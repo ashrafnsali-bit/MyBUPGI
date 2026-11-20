@@ -7,6 +7,11 @@ public class Grenade : MonoBehaviour
     public float explosionDamage = 100f;
     public float explosionForce = 1500f;
 
+    [Tooltip("If false, this explosion will not damage AI enemies (enemy-thrown grenades use this to avoid friendly fire).")]
+    public bool hurtsEnemies = true;
+    [Tooltip("The GameObject that threw this grenade. It is never damaged by its own explosion.")]
+    public GameObject owner;
+
     private GameObject explosionEffect;
     private AudioClip explosionSound;
     private float countdown;
@@ -109,15 +114,16 @@ public class Grenade : MonoBehaviour
             
             bool hitSomething = false;
 
-            // Check for enemy
+            // Check for enemy (skipped entirely for enemy-thrown grenades -> no friendly fire)
             EnemyAI enemy = col.GetComponentInParent<EnemyAI>();
-            if (enemy != null) { 
+            bool enemyIsOwner = enemy != null && owner != null && enemy.gameObject == owner;
+            if (enemy != null && hurtsEnemies && !enemyIsOwner) { 
                 enemy.TakeDamage(explosionDamage); 
                 FloatingDamage.Create(enemy.transform.position, (int)explosionDamage); 
                 hitSomething = true;
             }
             // Fallback for dummies or other enemies without EnemyAI script
-            else if (col.transform.tag == "Enemy" || col.transform.tag == "Dummie")
+            else if (hurtsEnemies && (col.transform.tag == "Enemy" || col.transform.tag == "Dummie"))
             {
                 col.transform.SendMessage("TakeDamage", explosionDamage, SendMessageOptions.DontRequireReceiver);
                 FloatingDamage.Create(col.transform.position, (int)explosionDamage);
