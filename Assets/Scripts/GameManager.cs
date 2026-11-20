@@ -12,6 +12,17 @@ public class GameManager : MonoBehaviour
     [Header("Level System")]
     public int currentLevel = 1;
     public int totalKills = 0; // Added to track overall score/kills
+    public int score = 0;
+    public int comboCount = 0;
+
+    [Header("Records")]
+    public int bestKills = 0;
+    public int bestScore = 0;
+
+    [Header("Combo")]
+    public float comboWindow = 3f;
+    private float lastKillTime = -999f;
+
     public int enemiesPerWaveBase = 3;
     public int extraEnemiesPerLevel = 2; // How many more enemies to add each level
     public GameObject enemyPrefabTemplate;
@@ -24,6 +35,7 @@ public class GameManager : MonoBehaviour
     private GameObject gameOverPanel;
     private Text gameOverText;
     private Button tryAgainButton;
+    private Button shareButton;
     private CanvasGroup gameOverCanvasGroup;
     
     // Level Announcement UI
@@ -33,6 +45,8 @@ public class GameManager : MonoBehaviour
     void Awake()
     {
         instance = this;
+        bestKills = PlayerPrefs.GetInt("MyBUPGI_BestKills", 0);
+        bestScore = PlayerPrefs.GetInt("MyBUPGI_BestScore", 0);
     }
 
     void Start()
@@ -89,7 +103,7 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            ShowAnnouncement("LEVEL " + currentLevel + " START", 3f);
+            ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelStart, currentLevel), 3f);
         }
     }
 
@@ -132,8 +146,8 @@ public class GameManager : MonoBehaviour
         GameObject waveObj = new GameObject("WaveText");
         waveObj.transform.SetParent(topPanelObj.transform, false);
         waveText = waveObj.AddComponent<Text>();
-        waveText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        waveText.fontSize = 45;
+        ArabicUI.Apply(waveText, true);
+        waveText.fontSize = 34;
         waveText.fontStyle = FontStyle.Bold;
         waveText.color = Color.white;
         waveText.alignment = TextAnchor.MiddleCenter;
@@ -153,8 +167,8 @@ public class GameManager : MonoBehaviour
         GameObject annObj = new GameObject("AnnouncementText");
         annObj.transform.SetParent(gameCanvasObj.transform, false);
         announcementText = annObj.AddComponent<Text>();
-        announcementText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        announcementText.fontSize = 80;
+        ArabicUI.Apply(announcementText, true);
+        announcementText.fontSize = 64;
         announcementText.fontStyle = FontStyle.Bold;
         announcementText.color = Color.yellow;
         announcementText.alignment = TextAnchor.MiddleCenter;
@@ -189,8 +203,8 @@ public class GameManager : MonoBehaviour
         GameObject goTextObj = new GameObject("GameOverText");
         goTextObj.transform.SetParent(gameOverPanel.transform, false);
         gameOverText = goTextObj.AddComponent<Text>();
-        gameOverText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        gameOverText.fontSize = 100;
+        ArabicUI.Apply(gameOverText, true);
+        gameOverText.fontSize = 76;
         gameOverText.fontStyle = FontStyle.Bold;
         gameOverText.alignment = TextAnchor.MiddleCenter;
         RectTransform gort = gameOverText.GetComponent<RectTransform>();
@@ -221,10 +235,10 @@ public class GameManager : MonoBehaviour
         GameObject btnTextObj = new GameObject("Text");
         btnTextObj.transform.SetParent(btnObj.transform, false);
         Text btnText = btnTextObj.AddComponent<Text>();
-        btnText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        btnText.fontSize = 50;
+        ArabicUI.Apply(btnText, true);
+        btnText.fontSize = 46;
         btnText.color = Color.white;
-        btnText.text = "TRY AGAIN";
+        btnText.text = ArabicStrings.TryAgain;
         btnText.alignment = TextAnchor.MiddleCenter;
         RectTransform btrt = btnText.GetComponent<RectTransform>();
         btrt.anchorMin = Vector2.zero;
@@ -232,38 +246,32 @@ public class GameManager : MonoBehaviour
         btrt.offsetMin = Vector2.zero;
         btrt.offsetMax = Vector2.zero;
 
-        // Quit Game Button
-        GameObject quitObj = new GameObject("QuitButton");
-        quitObj.transform.SetParent(gameOverPanel.transform, false);
-        Image quitImg = quitObj.AddComponent<Image>();
-        quitImg.color = new Color(0.8f, 0.2f, 0.2f, 1f); // Red color
-        Button quitButton = quitObj.AddComponent<Button>();
-        quitButton.onClick.AddListener(() => {
-            Time.timeScale = 1f;
-            Application.Quit();
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.isPlaying = false;
-#endif
-        });
-        RectTransform qrt = quitObj.GetComponent<RectTransform>();
-        qrt.anchorMin = new Vector2(0.5f, 0.5f);
-        qrt.anchorMax = new Vector2(0.5f, 0.5f);
-        qrt.anchoredPosition = new Vector2(0, -220); // Positioned below Try Again
-        qrt.sizeDelta = new Vector2(400, 100);
+        // Share Result Button (Application.Quit does nothing in WebGL)
+        GameObject shareObj = new GameObject("ShareButton");
+        shareObj.transform.SetParent(gameOverPanel.transform, false);
+        Image shareImg = shareObj.AddComponent<Image>();
+        shareImg.color = new Color(0.16f, 0.55f, 0.85f, 1f);
+        shareButton = shareObj.AddComponent<Button>();
+        shareButton.onClick.AddListener(ShareResult);
+        RectTransform srt = shareObj.GetComponent<RectTransform>();
+        srt.anchorMin = new Vector2(0.5f, 0.5f);
+        srt.anchorMax = new Vector2(0.5f, 0.5f);
+        srt.anchoredPosition = new Vector2(0, -220);
+        srt.sizeDelta = new Vector2(400, 100);
 
-        GameObject quitTextObj = new GameObject("Text");
-        quitTextObj.transform.SetParent(quitObj.transform, false);
-        Text quitText = quitTextObj.AddComponent<Text>();
-        quitText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        quitText.fontSize = 50;
-        quitText.color = Color.white;
-        quitText.text = "QUIT GAME";
-        quitText.alignment = TextAnchor.MiddleCenter;
-        RectTransform qtrt = quitText.GetComponent<RectTransform>();
-        qtrt.anchorMin = Vector2.zero;
-        qtrt.anchorMax = Vector2.one;
-        qtrt.offsetMin = Vector2.zero;
-        qtrt.offsetMax = Vector2.zero;
+        GameObject shareTextObj = new GameObject("Text");
+        shareTextObj.transform.SetParent(shareObj.transform, false);
+        Text shareText = shareTextObj.AddComponent<Text>();
+        ArabicUI.Apply(shareText, true);
+        shareText.fontSize = 46;
+        shareText.color = Color.white;
+        shareText.text = ArabicStrings.Share;
+        shareText.alignment = TextAnchor.MiddleCenter;
+        RectTransform strt = shareText.GetComponent<RectTransform>();
+        strt.anchorMin = Vector2.zero;
+        strt.anchorMax = Vector2.one;
+        strt.offsetMin = Vector2.zero;
+        strt.offsetMax = Vector2.zero;
     }
 
     private float checkTimer = 1f;
@@ -272,7 +280,7 @@ public class GameManager : MonoBehaviour
     {
         if (waveText != null && !isGameOver)
         {
-            waveText.text = "LEVEL " + currentLevel + "\n<size=20>Enemies: " + totalEnemies + " | KILLS: " + totalKills + "</size>";
+            waveText.text = ArabicUI.Format(ArabicStrings.HudTemplate, currentLevel, totalEnemies, totalKills, score);
         }
 
         // Failsafe to ensure level transitions even if counter gets out of sync
@@ -309,8 +317,8 @@ public class GameManager : MonoBehaviour
                 waveText.gameObject.SetActive(false);
                 announcementText.gameObject.SetActive(false);
                 
-                gameOverText.text = "GAME OVER\n<size=40>Total Kills: " + totalKills + "</size>";
-                gameOverText.color = new Color(1f, 0.2f, 0.2f); // Bright Red
+                gameOverText.text = BuildGameOverText();
+                gameOverText.color = new Color(1f, 0.35f, 0.25f);
             }
             
             // Fade in the game over panel smoothly (use unscaledDeltaTime because timeScale is 0)
@@ -352,7 +360,7 @@ public class GameManager : MonoBehaviour
         levelTransitioning = true;
         
         // Announce completion
-        ShowAnnouncement("LEVEL " + currentLevel + " COMPLETED!", 3f);
+        ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelComplete, currentLevel), 3f);
         yield return new WaitForSeconds(4f);
         
         // Increment Level
@@ -360,7 +368,7 @@ public class GameManager : MonoBehaviour
         int enemiesToSpawn = enemiesPerWaveBase + ((currentLevel - 1) * extraEnemiesPerLevel);
         
         // Announce next level
-        ShowAnnouncement("STARTING LEVEL " + currentLevel, 2f);
+        ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceNextLevel, currentLevel), 2f);
         yield return new WaitForSeconds(2.5f);
         
         // Start spawning
@@ -498,17 +506,78 @@ public class GameManager : MonoBehaviour
     public void EnemyDied()
     {
         if (isGameOver) return;
-        
+
         totalEnemies--;
-        totalKills++; // Increment score
-        if (totalEnemies < 0) totalEnemies = 0; // Prevent negative numbers
-        
-        Debug.Log("Enemy Died! Remaining: " + totalEnemies);
-        
+        totalKills++;
+        if (totalEnemies < 0) totalEnemies = 0;
+
+        // Combo: kills inside the window stack a score multiplier.
+        float now = Time.realtimeSinceStartup;
+        comboCount = (now - lastKillTime <= comboWindow) ? comboCount + 1 : 1;
+        lastKillTime = now;
+        int multiplier = Mathf.Clamp(comboCount, 1, 5);
+        score += 100 * multiplier;
+
+        if (UIManager.instance != null)
+        {
+            if (comboCount == 2) UIManager.instance.ShowKillMessage(ArabicStrings.ComboDouble);
+            else if (comboCount == 3) UIManager.instance.ShowKillMessage(ArabicStrings.ComboTriple);
+            else if (comboCount > 3) UIManager.instance.ShowKillMessage(ArabicUI.Format(ArabicStrings.ComboTemplate, multiplier));
+            if (comboCount > 1) UIManager.instance.ShowCombo(multiplier);
+        }
+
+        Debug.Log("Enemy Died! Remaining: " + totalEnemies + " | Combo x" + multiplier);
+
         if (totalEnemies == 0 && !levelTransitioning)
         {
-            StartCoroutine(LevelCompleteRoutine());
+            StartCoroutine(FinalKillRoutine());
         }
+    }
+
+    IEnumerator FinalKillRoutine()
+    {
+        levelTransitioning = true;
+        float previousScale = Time.timeScale;
+        Time.timeScale = 0.35f;
+        yield return new WaitForSecondsRealtime(0.35f);
+        Time.timeScale = previousScale;
+        levelTransitioning = false;
+        StartCoroutine(LevelCompleteRoutine());
+    }
+
+    bool IsNewRecord()
+    {
+        return totalKills > bestKills || score > bestScore;
+    }
+
+    void SaveRecords()
+    {
+        if (totalKills > bestKills)
+        {
+            bestKills = totalKills;
+            PlayerPrefs.SetInt("MyBUPGI_BestKills", bestKills);
+        }
+        if (score > bestScore)
+        {
+            bestScore = score;
+            PlayerPrefs.SetInt("MyBUPGI_BestScore", bestScore);
+        }
+        PlayerPrefs.Save();
+    }
+
+    string BuildGameOverText()
+    {
+        string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
+        string record = IsNewRecord() ? "\n" + ArabicStrings.NewRecord : "";
+        return ArabicStrings.GameOverTitle + "\n" + stats + record;
+    }
+
+    void ShareResult()
+    {
+        string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
+        string message = "MYBUPGI - " + stats + " #MyBUPGI";
+        try { GUIUtility.systemCopyBuffer = message; } catch (System.Exception) { }
+        Application.OpenURL("https://wa.me/?text=" + System.Uri.EscapeDataString(message));
     }
 
     public void PlayerDied()
@@ -532,11 +601,13 @@ public class GameManager : MonoBehaviour
             if (announcementText != null) announcementText.gameObject.SetActive(false);
             if (gameOverText != null)
             {
-                gameOverText.text = "YOU DIED\n<size=40>Total Kills: " + totalKills + "</size>";
-                gameOverText.color = new Color(1f, 0.2f, 0.2f);
+                gameOverText.text = BuildGameOverText();
+                gameOverText.color = new Color(1f, 0.35f, 0.25f);
             }
         }
-        
+
+        SaveRecords();
+
         // Stop the game world
         Time.timeScale = 0f;
     }

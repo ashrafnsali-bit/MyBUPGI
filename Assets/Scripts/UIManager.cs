@@ -44,6 +44,13 @@ public class UIManager : MonoBehaviour
     private float trailHealthPct = 1f;
     private RectTransform healthBarTrailFill;
 
+    // Hype UI (kill feed + combo + start overlay)
+    private Text killFeedText;
+    private Text comboText;
+    private float killFeedTimer = 0f;
+    private float comboTimer = 0f;
+    private GameObject startOverlay;
+
     void Awake()
     {
         if (instance == null)
@@ -89,6 +96,10 @@ public class UIManager : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
 
         canvasObj.AddComponent<GraphicRaycaster>();
+
+        // 1.2 Start overlay + hype UI
+        SetupStartOverlay(canvasObj.transform);
+        SetupHypeUI(canvasObj.transform);
 
         // 1.5 Damage Vignette
         GameObject vignetteObj = new GameObject("DamageVignette");
@@ -177,7 +188,7 @@ public class UIManager : MonoBehaviour
         GameObject healthObj = new GameObject("HealthText");
         healthObj.transform.SetParent(hpBgObj.transform, false);
         healthText = healthObj.AddComponent<Text>();
-        healthText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        ArabicUI.Apply(healthText, true);
         healthText.fontStyle = FontStyle.Bold;
         healthText.fontSize = 45;
         healthText.color = Color.white;
@@ -241,7 +252,7 @@ public class UIManager : MonoBehaviour
         GameObject ammoObj = new GameObject("AmmoText");
         ammoObj.transform.SetParent(ammoBgObj.transform, false);
         ammoText = ammoObj.AddComponent<Text>();
-        ammoText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        ArabicUI.Apply(ammoText, true);
         ammoText.fontStyle = FontStyle.Bold;
         ammoText.fontSize = 45;
         ammoText.color = Color.white;
@@ -269,7 +280,7 @@ public class UIManager : MonoBehaviour
         GameObject grenadeObj = new GameObject("GrenadeText");
         grenadeObj.transform.SetParent(grenadeBgObj.transform, false);
         grenadesText = grenadeObj.AddComponent<Text>();
-        grenadesText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        ArabicUI.Apply(grenadesText, true);
         grenadesText.fontStyle = FontStyle.Bold;
         grenadesText.fontSize = 35;
         grenadesText.color = Color.white;
@@ -291,7 +302,7 @@ public class UIManager : MonoBehaviour
     {
         if (healthText != null)
         {
-            healthText.text = "HP: " + health.ToString();
+            healthText.text = ArabicUI.Format(ArabicStrings.HealthTemplate, health);
         }
 
         if (healthBarFill != null)
@@ -314,7 +325,7 @@ public class UIManager : MonoBehaviour
     {
         if (grenadesText != null)
         {
-            grenadesText.text = "G: " + count.ToString();
+            grenadesText.text = ArabicUI.Format(ArabicStrings.GrenadesTemplate, count);
             if (count == 0) grenadesText.color = Color.red;
             else grenadesText.color = Color.white;
         }
@@ -460,6 +471,167 @@ public class UIManager : MonoBehaviour
                 damageOverlay.color = c;
             }
         }
+
+        // 4. Hype UI fades (uses unscaled time so it still reads during slow-motion)
+        if (killFeedTimer > 0 && killFeedText != null)
+        {
+            killFeedTimer -= Time.unscaledDeltaTime;
+            Color c = killFeedText.color;
+            c.a = Mathf.Clamp01(killFeedTimer / 0.8f);
+            killFeedText.color = c;
+            killFeedText.rectTransform.anchoredPosition = Vector2.Lerp(
+                killFeedText.rectTransform.anchoredPosition,
+                new Vector2(0, 330), Time.unscaledDeltaTime * 4f);
+        }
+
+        if (comboTimer > 0 && comboText != null)
+        {
+            comboTimer -= Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(comboTimer / 1.6f);
+            comboText.color = new Color(1f, 0.75f, 0f, t);
+            comboText.rectTransform.localScale = Vector3.one * (1f + (1f - t) * 0.25f);
+            if (comboTimer <= 0) comboText.gameObject.SetActive(false);
+        }
+    }
+
+    private void SetupStartOverlay(Transform parent)
+    {
+        startOverlay = new GameObject("StartOverlay");
+        startOverlay.transform.SetParent(parent, false);
+        RectTransform rt = startOverlay.AddComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+
+        Image bg = startOverlay.AddComponent<Image>();
+        bg.color = new Color(0.03f, 0.04f, 0.06f, 0.94f);
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(startOverlay.transform, false);
+        Text title = titleObj.AddComponent<Text>();
+        title.font = ArabicUI.Get(true);
+        title.text = "MYBUPGI";
+        title.fontSize = 110;
+        title.fontStyle = FontStyle.Bold;
+        title.color = new Color(1f, 0.78f, 0.15f, 1f);
+        title.alignment = TextAnchor.MiddleCenter;
+        RectTransform titleRt = title.rectTransform;
+        titleRt.anchorMin = new Vector2(0.5f, 0.5f);
+        titleRt.anchorMax = new Vector2(0.5f, 0.5f);
+        titleRt.anchoredPosition = new Vector2(0, 210);
+        titleRt.sizeDelta = new Vector2(1400, 180);
+
+        GameObject subObj = new GameObject("Subtitle");
+        subObj.transform.SetParent(startOverlay.transform, false);
+        Text sub = subObj.AddComponent<Text>();
+        ArabicUI.Apply(sub, false);
+        sub.text = ArabicStrings.StartSubtitle;
+        sub.fontSize = 56;
+        sub.color = Color.white;
+        sub.alignment = TextAnchor.MiddleCenter;
+        RectTransform subRt = sub.rectTransform;
+        subRt.anchorMin = new Vector2(0.5f, 0.5f);
+        subRt.anchorMax = new Vector2(0.5f, 0.5f);
+        subRt.anchoredPosition = new Vector2(0, 70);
+        subRt.sizeDelta = new Vector2(1500, 100);
+
+        GameObject controlsObj = new GameObject("Controls");
+        controlsObj.transform.SetParent(startOverlay.transform, false);
+        Text controls = controlsObj.AddComponent<Text>();
+        ArabicUI.Apply(controls, false);
+        controls.text = ArabicStrings.Controls;
+        controls.fontSize = 34;
+        controls.color = new Color(0.85f, 0.88f, 0.95f, 1f);
+        controls.alignment = TextAnchor.MiddleCenter;
+        RectTransform controlsRt = controls.rectTransform;
+        controlsRt.anchorMin = new Vector2(0.5f, 0.5f);
+        controlsRt.anchorMax = new Vector2(0.5f, 0.5f);
+        controlsRt.anchoredPosition = new Vector2(0, -60);
+        controlsRt.sizeDelta = new Vector2(1600, 120);
+
+        GameObject playObj = new GameObject("PlayButton");
+        playObj.transform.SetParent(startOverlay.transform, false);
+        Image playImg = playObj.AddComponent<Image>();
+        playImg.color = new Color(1f, 0.6f, 0f, 1f);
+        Button playBtn = playObj.AddComponent<Button>();
+        playBtn.onClick.AddListener(() =>
+        {
+            startOverlay.SetActive(false);
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+            Time.timeScale = 1f;
+        });
+        RectTransform playRt = playObj.GetComponent<RectTransform>();
+        playRt.anchorMin = new Vector2(0.5f, 0.5f);
+        playRt.anchorMax = new Vector2(0.5f, 0.5f);
+        playRt.anchoredPosition = new Vector2(0, -210);
+        playRt.sizeDelta = new Vector2(420, 100);
+
+        GameObject playTextObj = new GameObject("Text");
+        playTextObj.transform.SetParent(playObj.transform, false);
+        Text playText = playTextObj.AddComponent<Text>();
+        ArabicUI.Apply(playText, true);
+        playText.text = ArabicStrings.StartSubtitle;
+        playText.fontSize = 46;
+        playText.color = Color.white;
+        playText.alignment = TextAnchor.MiddleCenter;
+        RectTransform ptrt = playText.rectTransform;
+        ptrt.anchorMin = Vector2.zero;
+        ptrt.anchorMax = Vector2.one;
+        ptrt.offsetMin = Vector2.zero;
+        ptrt.offsetMax = Vector2.zero;
+    }
+
+    private void SetupHypeUI(Transform parent)
+    {
+        GameObject feedObj = new GameObject("KillFeedText");
+        feedObj.transform.SetParent(parent, false);
+        killFeedText = feedObj.AddComponent<Text>();
+        ArabicUI.Apply(killFeedText, true);
+        killFeedText.fontSize = 52;
+        killFeedText.color = new Color(1f, 0.9f, 0.2f, 0f);
+        killFeedText.alignment = TextAnchor.MiddleCenter;
+        killFeedText.raycastTarget = false;
+        RectTransform feedRt = killFeedText.rectTransform;
+        feedRt.anchorMin = new Vector2(0.5f, 0.5f);
+        feedRt.anchorMax = new Vector2(0.5f, 0.5f);
+        feedRt.anchoredPosition = new Vector2(0, 280);
+        feedRt.sizeDelta = new Vector2(1200, 100);
+
+        GameObject comboObj = new GameObject("ComboText");
+        comboObj.transform.SetParent(parent, false);
+        comboText = comboObj.AddComponent<Text>();
+        ArabicUI.Apply(comboText, true);
+        comboText.fontSize = 64;
+        comboText.color = new Color(1f, 0.75f, 0f, 0f);
+        comboText.alignment = TextAnchor.MiddleRight;
+        comboText.raycastTarget = false;
+        RectTransform comboRt = comboText.rectTransform;
+        comboRt.anchorMin = new Vector2(0.5f, 0.5f);
+        comboRt.anchorMax = new Vector2(0.5f, 0.5f);
+        comboRt.anchoredPosition = new Vector2(520, -120);
+        comboRt.sizeDelta = new Vector2(420, 120);
+        comboObj.SetActive(false);
+    }
+
+    public void ShowKillMessage(string message)
+    {
+        if (killFeedText == null) return;
+        killFeedText.text = message;
+        killFeedText.color = new Color(1f, 0.9f, 0.2f, 1f);
+        killFeedText.rectTransform.anchoredPosition = new Vector2(0, 360);
+        killFeedTimer = 0.8f;
+    }
+
+    public void ShowCombo(int multiplier)
+    {
+        if (comboText == null) return;
+        comboText.gameObject.SetActive(true);
+        comboText.text = ArabicUI.Format(ArabicStrings.ComboTemplate, multiplier);
+        comboText.rectTransform.localScale = Vector3.one * 1.35f;
+        comboText.color = new Color(1f, 0.75f, 0f, 1f);
+        comboTimer = 1.6f;
     }
 
     private void SetupMobileControls(Transform parent)
@@ -499,7 +671,7 @@ public class UIManager : MonoBehaviour
         Color swapColor = new Color(0.2f, 0.8f, 0.2f, 0.85f);
 
         // Fire Button (Large, main thumb resting position)
-        GameObject fireBtn = CreateMobileButton(parent, "FireBtn", new Vector2(-200, 200), 180, fireColor, "FIRE");
+        GameObject fireBtn = CreateMobileButton(parent, "FireBtn", new Vector2(-200, 200), 180, fireColor, ArabicStrings.MobileFire);
         EventTrigger fireTrig = fireBtn.GetComponent<EventTrigger>();
         if (fireTrig == null) fireTrig = fireBtn.AddComponent<EventTrigger>();
         EventTrigger.Entry downEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
@@ -510,28 +682,28 @@ public class UIManager : MonoBehaviour
         fireTrig.triggers.Add(upEntry);
 
         // Jump Button (Directly above Fire)
-        GameObject jumpBtn = CreateMobileButton(parent, "JumpBtn", new Vector2(-200, 420), 120, jumpColor, "JUMP");
+        GameObject jumpBtn = CreateMobileButton(parent, "JumpBtn", new Vector2(-200, 420), 120, jumpColor, ArabicStrings.MobileJump);
         EventTrigger jumpTrig = jumpBtn.GetComponent<EventTrigger>();
         EventTrigger.Entry jDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         jDown.callback.AddListener((data) => { MobileJumpPressed = true; });
         jumpTrig.triggers.Add(jDown);
 
         // Reload Button (Left of Fire)
-        GameObject reloadBtn = CreateMobileButton(parent, "ReloadBtn", new Vector2(-420, 200), 120, reloadColor, "RELOAD");
+        GameObject reloadBtn = CreateMobileButton(parent, "ReloadBtn", new Vector2(-420, 200), 120, reloadColor, ArabicStrings.MobileReload);
         EventTrigger reloadTrig = reloadBtn.GetComponent<EventTrigger>();
         EventTrigger.Entry rDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         rDown.callback.AddListener((data) => { MobileReloadPressed = true; });
         reloadTrig.triggers.Add(rDown);
 
         // Grenade Button (Above Reload)
-        GameObject grenadeBtn = CreateMobileButton(parent, "GrenadeBtn", new Vector2(-420, 360), 120, bombColor, "BOMB");
+        GameObject grenadeBtn = CreateMobileButton(parent, "GrenadeBtn", new Vector2(-420, 360), 120, bombColor, ArabicStrings.MobileGrenade);
         EventTrigger bombTrig = grenadeBtn.GetComponent<EventTrigger>();
         EventTrigger.Entry bDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         bDown.callback.AddListener((data) => { MobileGrenadePressed = true; });
         bombTrig.triggers.Add(bDown);
 
         // Swap Weapon Button (Above Jump)
-        GameObject swapBtn = CreateMobileButton(parent, "SwapBtn", new Vector2(-200, 580), 120, swapColor, "SWAP");
+        GameObject swapBtn = CreateMobileButton(parent, "SwapBtn", new Vector2(-200, 580), 120, swapColor, ArabicStrings.MobileSwap);
         EventTrigger swapTrig = swapBtn.GetComponent<EventTrigger>();
         EventTrigger.Entry sDown = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         sDown.callback.AddListener((data) => { MobileSwitchWeaponPressed = true; });
@@ -583,7 +755,7 @@ public class UIManager : MonoBehaviour
         GameObject textObj = new GameObject("Text");
         textObj.transform.SetParent(topObj.transform, false);
         Text t = textObj.AddComponent<Text>();
-        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        ArabicUI.Apply(t, true);
         t.text = text;
         t.fontSize = (int)(size * 0.28f);
         t.fontStyle = FontStyle.Bold;

@@ -18,20 +18,30 @@ public static class GitHubGameExport
     [MenuItem("Tools/GitHub/1. Build WebGL (Play Online on GitHub Pages)")]
     public static void BuildWebGLForGitHubPages()
     {
+        BuildWebGLInternal(true);
+    }
+
+    /// <summary>Headless build entry point for CI / command line. No modal dialogs.</summary>
+    public static void BuildWebGLBatch()
+    {
+        BuildWebGLInternal(false);
+    }
+
+    private static void BuildWebGLInternal(bool showDialog)
+    {
         if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.WebGL, BuildTarget.WebGL))
         {
-            EditorUtility.DisplayDialog(
-                "WebGL Support Required",
-                "WebGL Build Support is not installed in your Unity version.\n\n" +
-                "To install it:\n" +
-                "1. Open Unity Hub.\n" +
-                "2. Go to 'Installs' tab.\n" +
-                "3. Click the gear/settings icon next to Unity 6 (6000.4.6f1).\n" +
-                "4. Select 'Add Modules' and check 'WebGL Build Support'.\n" +
-                "5. Once finished, run this tool again!",
-                "OK"
-            );
-            return;
+            string msg = "WebGL Build Support is not installed in Unity 6000.4.6f1.";
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog(
+                    "WebGL Support Required",
+                    msg + "\n\nInstall it from Unity Hub -> Installs -> Add Modules -> WebGL Build Support.",
+                    "OK"
+                );
+                return;
+            }
+            throw new System.Exception(msg);
         }
 
         string exportDir = Path.Combine(Directory.GetCurrentDirectory(), "docs");
@@ -60,22 +70,29 @@ public static class GitHubGameExport
             // Create .nojekyll so GitHub Pages serves all assets and subdirectories
             File.WriteAllText(Path.Combine(exportDir, ".nojekyll"), "");
 
-            EditorUtility.DisplayDialog(
-                "Build Succeeded! 🎮",
-                "Your WebGL game has been built successfully into the 'docs' folder!\n\n" +
-                "Steps to activate your online link:\n" +
-                "1. Go to your repository on GitHub: https://github.com/ashrafnsali-bit/MyBUPGI\n" +
-                "2. Go to Settings -> Pages.\n" +
-                "3. Under 'Build and deployment', choose 'Deploy from a branch'.\n" +
-                "4. Branch: main, Folder: /docs, then click Save.\n\n" +
-                "Your game will be live and playable at:\n" +
-                "https://ashrafnsali-bit.github.io/MyBUPGI/",
-                "Awesome!"
-            );
+            Debug.Log("[GitHubGameExport] WebGL build succeeded -> docs/");
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog(
+                    "Build Succeeded! 🎮",
+                    "Your WebGL game has been built successfully into the 'docs' folder!\n\n" +
+                    "Steps to activate your online link:\n" +
+                    "1. Go to your repository on GitHub: https://github.com/ashrafnsali-bit/MyBUPGI\n" +
+                    "2. Go to Settings -> Pages.\n" +
+                    "3. Under 'Build and deployment', choose 'Deploy from a branch'.\n" +
+                    "4. Branch: main, Folder: /docs, then click Save.\n\n" +
+                    "Your game will be live and playable at:\n" +
+                    "https://ashrafnsali-bit.github.io/MyBUPGI/",
+                    "Awesome!"
+                );
+            }
         }
         else
         {
-            EditorUtility.DisplayDialog("Build Failed", "WebGL build failed. Check the Unity Console for details.", "OK");
+            string msg = "WebGL build failed. Check the Unity Console for details.";
+            Debug.LogError("[GitHubGameExport] " + msg);
+            if (showDialog) EditorUtility.DisplayDialog("Build Failed", msg, "OK");
+            else throw new System.Exception(msg);
         }
     }
 

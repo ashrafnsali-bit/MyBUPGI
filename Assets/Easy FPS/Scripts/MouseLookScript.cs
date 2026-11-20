@@ -10,7 +10,11 @@ public class MouseLookScript : MonoBehaviour {
 	 * Hiding the cursor.
 	 */
 	void Awake(){
+		// WebGL requires a real user gesture for pointer lock. The Arabic start
+		// overlay button requests it instead; locking here throws WrongDocumentError.
+#if !UNITY_WEBGL
 		Cursor.lockState = CursorLockMode.Locked;
+#endif
 		myCamera = GameObject.FindGameObjectWithTag("MainCamera").transform;
 	}
 
