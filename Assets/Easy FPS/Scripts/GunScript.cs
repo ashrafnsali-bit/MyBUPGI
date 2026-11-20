@@ -88,6 +88,8 @@ public class GunScript : MonoBehaviour {
 
 		GiveCameraScriptMySensitvity();
 
+		RecoverCameraRecoil();
+
 		PositionGun();
 
 		Shooting();
@@ -315,6 +317,15 @@ public class GunScript : MonoBehaviour {
 	private float currentRecoilZPos;
 	private float currentRecoilXPos;
 	private float currentRecoilYPos;
+
+	// Camera recoil is now a small, self-recovering kick instead of a permanent drift.
+	// The old code multiplied tiny recoil values by gunPrecision (300), which stacked
+	// ~1.5 degrees of yaw/pitch on every shot and never returned to the aim point.
+	private float recoilYawAccum;
+	private float recoilPitchAccum;
+	public float recoilCameraFactor = 6f;   // max camera kick per shot (degrees)
+	public float recoilRecoverySpeed = 7f;  // how quickly the view settles back
+
 	/*
 	 * Called from ShootMethod();, upon shooting the recoil amount will increase.
 	 */
@@ -323,16 +334,34 @@ public class GunScript : MonoBehaviour {
 		currentRecoilXPos -= (Random.value - 0.5f) * recoilAmount_x;
 		currentRecoilYPos -= (Random.value - 0.5f) * recoilAmount_y;
 
-		// RECOIL LOCK: Disable vertical recoil for mobile to keep trajectory flat/manageable
-		if (mls != null && !mls.IsMobile())
+		if (mls != null)
 		{
-			mls.wantedCameraXRotation -= Mathf.Abs(currentRecoilYPos * gunPrecision);
+			float yawKick = currentRecoilXPos * recoilCameraFactor;
+			float pitchKick = Mathf.Abs(currentRecoilYPos) * recoilCameraFactor;
+
+			// RECOIL LOCK: keep vertical recoil off on mobile.
+			if (!mls.IsMobile())
+			{
+				mls.wantedCameraXRotation -= pitchKick;
+				recoilPitchAccum += pitchKick;
+			}
+			mls.wantedYRotation -= yawKick;
+			recoilYawAccum += yawKick;
 		}
-		
-		mls.wantedYRotation -= (currentRecoilXPos * gunPrecision);		 
 
 		expandValues_crosshair += new Vector2(6,12);
+	}
 
+	// Returns ONLY the recoil we injected, leaving the player's own mouse input untouched.
+	void RecoverCameraRecoil(){
+		if (mls == null || (recoilYawAccum == 0f && recoilPitchAccum == 0f)) return;
+		float t = Mathf.Min(1f, Time.deltaTime * recoilRecoverySpeed);
+		float yaw = recoilYawAccum * t;
+		float pitch = recoilPitchAccum * t;
+		mls.wantedYRotation += yaw;
+		if (!mls.IsMobile()) mls.wantedCameraXRotation += pitch;
+		recoilYawAccum -= yaw;
+		recoilPitchAccum -= pitch;
 	}
 
 	[Header("Shooting setup - MUSTDO")]
@@ -520,7 +549,7 @@ public class GunScript : MonoBehaviour {
 					print ("Missing 'Shoot Sound Source'.");
 
 				RecoilMath();
-				if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.1f, 0.05f);
+				if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.06f, 0.02f);
 #if UNITY_ANDROID || UNITY_IOS
 				Handheld.Vibrate();
 #endif

@@ -12,7 +12,11 @@ public static class ArabicStrings
     public const string Share = "ﺔﺠﻴﺘﻨﻟﺍ ﻙﺭﺎﺷ";
     public const string ComboDouble = "!ﺝﻭﺩﺰﻣ ﻞﺘﻗ";
     public const string ComboTriple = "!ﻲﺛﻼﺛ ﻞﺘﻗ";
-    public const string ComboTemplate = "x{0} ﺔﻠﺴﻠﺳ";
+    public const string ComboTemplate = "{0}× ﺔﻠﺴﻠﺳ";
+    public const string RewardHealth = "ﺔﺤﺻ {0}+ :ﺓﺄﻓﺎﻜﻣ";
+    public const string RewardShield = "ﻉﺭﺩ {0}+ :ﺓﺄﻓﺎﻜﻣ";
+    public const string RewardGrenadesScore = "ﺔﻄﻘﻧ {1}+ | ﻞﺑﺎﻨﻗ {0} :ﺓﺄﻓﺎﻜﻣ";
+    public const string RewardLevelComplete = "ﺔﻄﻘﻧ {1}+ :{0} ﻯﻮﺘﺴﻤﻟﺍ ﺓﺄﻓﺎﻜﻣ";
     public const string HealthTemplate = "{0} :ﺔﺤﺼﻟﺍ";
     public const string GrenadesTemplate = "{0} :ﻞﺑﺎﻨﻗ";
     public const string StartSubtitle = "ﺀﺪﺒﻠﻟ ﻂﻐﺿﺍ";

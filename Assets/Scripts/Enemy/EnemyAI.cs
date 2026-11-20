@@ -116,6 +116,7 @@ public class EnemyAI : MonoBehaviour
     private float spawnTime;
     private float nextPerceptionCheckTime;
     private bool cachedCanSeePlayer;
+    private float orbitDirection = 1f; // persistent strafe side -> smooth orbit instead of random jitter
 
     void Awake()
     {
@@ -270,6 +271,7 @@ public class EnemyAI : MonoBehaviour
         lastKnownPlayerPosition = transform.position;
         tacticalPoint = transform.position;
         flankSlot = AssignFlankSlot();
+        orbitDirection = flankSlot == 0 ? (Random.value < 0.5f ? -1f : 1f) : (flankSlot < 0 ? -1f : 1f);
         SetState(EnemyState.Patrol);
     }
 
@@ -657,18 +659,19 @@ public class EnemyAI : MonoBehaviour
 
         if (distance > preferredRange * 1.15f)
         {
-            // Close the gap but keep a steady path refresh rate (no per-frame recompute).
+            // Predictive pursuit: intercept where the player is heading, not where they were.
+            Vector3 lead = player.position + Vector3.ClampMagnitude(playerVelocity, 12f) * 0.35f;
             agent.speed = moveSpeed;
             agent.stoppingDistance = preferredRange * 0.8f;
             if (Time.time >= nextPathUpdateTime)
             {
-                agent.SetDestination(player.position);
+                agent.SetDestination(SnapToNavMesh(lead, 4f));
                 nextPathUpdateTime = Time.time + 0.18f;
             }
         }
         else if (distance < preferredRange * 0.6f && archetype != EnemyArchetype.Rusher)
         {
-            // Back off to the preferred range instead of standing inside the player's face.
+            // Back off to the preferred range instead of crowding the player.
             Vector3 away = transform.position - player.position;
             away.y = 0f;
             agent.speed = moveSpeed * 0.8f;
@@ -680,24 +683,54 @@ public class EnemyAI : MonoBehaviour
         }
         else
         {
-            // Strafe around the player, using cover when available.
+            // Continuous orbit: small, frequent course corrections keep the enemy circling
+            // smoothly instead of stopping and restarting at a random point every second.
             if (Time.time >= nextStrafeTime)
             {
-                nextStrafeTime = Time.time + Random.Range(0.9f, 1.8f);
-                Vector3 tangent = Vector3.Cross((player.position - transform.position).normalized, Vector3.up);
-                if (flankSlot < 0) tangent = -tangent;
-                if (Random.value < 0.25f) tangent = -tangent;
+                nextStrafeTime = Time.time + 0.45f;
+                Vector3 radial = transform.position - player.position;
+                radial.y = 0f;
+                if (radial.sqrMagnitude < 0.01f) radial = transform.forward;
+                radial.Normalize();
+                Vector3 tangent = Vector3.Cross(radial, Vector3.up) * orbitDirection;
+                Vector3 desired = player.position + (radial + tangent * 0.4f).normalized * preferredRange;
 
-                Vector3 candidate = transform.position + tangent * Random.Range(3f, 5.5f);
                 NavMeshHit hit;
-                if (NavMesh.SamplePosition(candidate, out hit, 3f, NavMesh.AllAreas) &&
+                if (NavMesh.SamplePosition(desired, out hit, 5f, NavMesh.AllAreas) &&
                     !IsInsideOrNearContainer(hit.position))
                 {
-                    agent.speed = moveSpeed * 0.7f;
+                    agent.speed = moveSpeed * 0.75f;
                     agent.SetDestination(hit.position);
+                }
+                else
+                {
+                    orbitDirection = -orbitDirection; // blocked -> circle the other way
                 }
             }
         }
+
+        ApplySeparation();
+    }
+
+    void ApplySeparation()
+    {
+        if (agent == null || !agent.isOnNavMesh || agent.velocity.sqrMagnitude < 0.1f) return;
+        Vector3 push = Vector3.zero;
+        for (int i = 0; i < activeEnemies.Count; i++)
+        {
+            EnemyAI other = activeEnemies[i];
+            if (other == null || other == this || other.isDead) continue;
+            Vector3 d = transform.position - other.transform.position;
+            d.y = 0f;
+            float sq = d.sqrMagnitude;
+            if (sq > 0.01f && sq < 9f)
+            {
+                float dist = Mathf.Sqrt(sq);
+                push += d / dist * (3f - dist);
+            }
+        }
+        if (push.sqrMagnitude > 0.01f)
+            agent.Move(Vector3.ClampMagnitude(push, 0.6f) * Time.deltaTime);
     }
 
     void SearchAround()
@@ -722,7 +755,7 @@ public class EnemyAI : MonoBehaviour
         dir.y = 0f;
         if (dir.sqrMagnitude < 0.01f) return;
         Quaternion wanted = Quaternion.LookRotation(dir.normalized);
-        transform.rotation = Quaternion.Slerp(transform.rotation, wanted, Time.deltaTime * Mathf.Max(speed, rotationSpeed));
+        transform.rotation = Quaternion.Slerp(transform.rotation, wanted, Time.deltaTime * Mathf.Max(speed, 1f));
     }
 
     void FaceMovementOrTarget(Vector3 fallback)

@@ -41,6 +41,7 @@ public class GameManager : MonoBehaviour
     // Level Announcement UI
     private Text announcementText;
     private CanvasGroup announcementCanvasGroup;
+    private Coroutine announcementRoutine;
 
     void Awake()
     {
@@ -128,7 +129,7 @@ public class GameManager : MonoBehaviour
         topRt.anchorMax = new Vector2(0, 1);   // Top-Left
         topRt.pivot = new Vector2(0, 1);       // Pivot at Top-Left
         topRt.anchoredPosition = new Vector2(20, -20); // 20px margin from top-left corner
-        topRt.sizeDelta = new Vector2(400, 100); // Slightly smaller to look neat on the side
+        topRt.sizeDelta = new Vector2(900, 100); // Wide enough for all four HUD stats (no overflow off-screen)
 
         // Golden Accent Line at the bottom of the panel
         GameObject accentObj = new GameObject("AccentLine");
@@ -147,7 +148,7 @@ public class GameManager : MonoBehaviour
         waveObj.transform.SetParent(topPanelObj.transform, false);
         waveText = waveObj.AddComponent<Text>();
         ArabicUI.Apply(waveText, true);
-        waveText.fontSize = 34;
+        waveText.fontSize = 28;
         waveText.fontStyle = FontStyle.Bold;
         waveText.color = Color.white;
         waveText.alignment = TextAnchor.MiddleCenter;
@@ -331,7 +332,10 @@ public class GameManager : MonoBehaviour
 
     public void ShowAnnouncement(string message, float duration)
     {
-        StartCoroutine(AnnouncementRoutine(message, duration));
+        // Avoid two banners fighting over the same CanvasGroup (e.g. a reward on a kill
+        // that happens while the next-level banner is still fading).
+        if (announcementRoutine != null) StopCoroutine(announcementRoutine);
+        announcementRoutine = StartCoroutine(AnnouncementRoutine(message, duration));
     }
 
     IEnumerator AnnouncementRoutine(string message, float duration)
@@ -353,14 +357,16 @@ public class GameManager : MonoBehaviour
             announcementCanvasGroup.alpha -= Time.deltaTime * 2f;
             yield return null;
         }
+        announcementRoutine = null;
     }
 
     IEnumerator LevelCompleteRoutine()
     {
         levelTransitioning = true;
         
-        // Announce completion
-        ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelComplete, currentLevel), 3f);
+        // Announce completion + the reward earned for clearing this level.
+        string rewardMessage = GrantLevelCompleteReward(currentLevel);
+        ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelComplete, currentLevel) + "\n" + rewardMessage, 3.5f);
         yield return new WaitForSeconds(4f);
         
         // Increment Level
@@ -511,6 +517,11 @@ public class GameManager : MonoBehaviour
         totalKills++;
         if (totalEnemies < 0) totalEnemies = 0;
 
+        // Every 10 kills grants a rotating reward (health -> shield -> grenades + score).
+        const int killsPerReward = 10;
+        if (totalKills > 0 && totalKills % killsPerReward == 0)
+            GrantKillMilestoneReward(totalKills / killsPerReward);
+
         // Combo: kills inside the window stack a score multiplier.
         float now = Time.realtimeSinceStartup;
         comboCount = (now - lastKillTime <= comboWindow) ? comboCount + 1 : 1;
@@ -543,6 +554,71 @@ public class GameManager : MonoBehaviour
         Time.timeScale = previousScale;
         levelTransitioning = false;
         StartCoroutine(LevelCompleteRoutine());
+    }
+
+    GameObject GetPlayerObject()
+    {
+        if (player != null) return player.gameObject;
+        return GameObject.FindWithTag("Player");
+    }
+
+    // Reward for a kill milestone. Rotates so the player keeps getting useful help.
+    void GrantKillMilestoneReward(int tier)
+    {
+        if (isGameOver) return;
+        GameObject po = GetPlayerObject();
+        if (po == null) return;
+
+        string message;
+        switch (tier % 3)
+        {
+            case 1:
+            {
+                PlayerHealth hp = po.GetComponent<PlayerHealth>();
+                if (hp != null) hp.Heal(25f);
+                message = ArabicUI.Format(ArabicStrings.RewardHealth, 25);
+                break;
+            }
+            case 2:
+            {
+                PlayerAbilities ab = po.GetComponent<PlayerAbilities>();
+                if (ab != null) ab.currentShield = Mathf.Min(ab.maxShield, ab.currentShield + 100f);
+                message = ArabicUI.Format(ArabicStrings.RewardShield, 100);
+                break;
+            }
+            default:
+            {
+                PlayerGrenades gr = po.GetComponent<PlayerGrenades>();
+                if (gr != null) gr.AddGrenades(2);
+                score += 500;
+                message = ArabicUI.Format(ArabicStrings.RewardGrenadesScore, 2, 500);
+                break;
+            }
+        }
+        ShowAnnouncement(message, 2.2f);
+    }
+
+    // Reward for clearing a level: heal, full shield, a grenade and a score bonus.
+    // Returns the shaped Arabic message so the completion banner can show it inline.
+    string GrantLevelCompleteReward(int completedLevel)
+    {
+        int bonus = 500 * completedLevel;
+        score += bonus;
+
+        GameObject po = GetPlayerObject();
+        if (po != null)
+        {
+            PlayerHealth hp = po.GetComponent<PlayerHealth>();
+            if (hp != null) hp.Heal(30f);
+
+            PlayerAbilities ab = po.GetComponent<PlayerAbilities>();
+            if (ab != null) ab.currentShield = ab.maxShield;
+
+            PlayerGrenades gr = po.GetComponent<PlayerGrenades>();
+            if (gr != null) gr.AddGrenades(1);
+        }
+
+        return ArabicUI.Format(ArabicStrings.RewardLevelComplete, completedLevel, bonus);
     }
 
     bool IsNewRecord()
