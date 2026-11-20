@@ -1,7 +1,7 @@
 // Generated with arabic-reshaper + bidi-js. Visual-order strings for Unity UI Text.
 public static class ArabicStrings
 {
-    public const string HudTemplate = "{3} :ﻁﺎﻘﻨﻟﺍ | {2} :ﻰﻠﺘﻘﻟﺍ | {1} :ﺀﺍﺪﻋﻷﺍ | {0} ﻯﻮﺘﺴﻤﻟﺍ";
+    public const string HudTemplate = "{0} ﻯﻮﺘﺴﻤﻟﺍ | {1} :ﺀﺍﺪﻋﻷﺍ | {2} :ﻰﻠﺘﻘﻟﺍ | {3} :ﻁﺎﻘﻨﻟﺍ";
     public const string AnnounceLevelStart = "ﺃﺪﺒﻳ {0} ﻯﻮﺘﺴﻤﻟﺍ";
     public const string AnnounceLevelComplete = "!ﻞﻤﺘﻛﺍ {0} ﻯﻮﺘﺴﻤﻟﺍ";
     public const string AnnounceNextLevel = "{0} ﻯﻮﺘﺴﻤﻟﺍ ﺀﺪﺑ";
