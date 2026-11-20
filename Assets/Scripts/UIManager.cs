@@ -51,6 +51,16 @@ public class UIManager : MonoBehaviour
     private float comboTimer = 0f;
     private GameObject startOverlay;
 
+    // Surprise & gifts UI
+    private Text buffText;
+    private Text eventTimerText;
+    private Text achievementText;
+    private float buffTimer = 0f;
+    private float eventTimerTimer = 0f;
+    private float achievementTimer = 0f;
+    private Button dailyGiftButton;
+    private Text dailyGiftLabel;
+
     void Awake()
     {
         if (instance == null)
@@ -492,6 +502,21 @@ public class UIManager : MonoBehaviour
             comboText.rectTransform.localScale = Vector3.one * (1f + (1f - t) * 0.25f);
             if (comboTimer <= 0) comboText.gameObject.SetActive(false);
         }
+
+        FadeToast(buffText, ref buffTimer);
+        FadeToast(eventTimerText, ref eventTimerTimer);
+        FadeToast(achievementText, ref achievementTimer);
+
+        if (dailyGiftButton != null && Time.frameCount % 30 == 0) RefreshDailyGiftButton();
+    }
+
+    private void FadeToast(Text text, ref float timer)
+    {
+        if (text == null || timer <= 0f) return;
+        timer -= Time.unscaledDeltaTime;
+        Color c = text.color;
+        c.a = Mathf.Clamp01(timer / 0.8f);
+        text.color = c;
     }
 
     private void SetupStartOverlay(Transform parent)
@@ -581,6 +606,51 @@ public class UIManager : MonoBehaviour
         ptrt.anchorMax = Vector2.one;
         ptrt.offsetMin = Vector2.zero;
         ptrt.offsetMax = Vector2.zero;
+
+        // Daily gift button — deliberately does NOT hide the overlay or lock the cursor.
+        GameObject dailyObj = new GameObject("DailyGiftButton");
+        dailyObj.transform.SetParent(startOverlay.transform, false);
+        Image dailyImg = dailyObj.AddComponent<Image>();
+        dailyImg.color = new Color(0.95f, 0.45f, 0.1f, 1f);
+        Button dailyBtn = dailyObj.AddComponent<Button>();
+        RectTransform dailyRt = dailyObj.GetComponent<RectTransform>();
+        dailyRt.anchorMin = new Vector2(0.5f, 0.5f);
+        dailyRt.anchorMax = new Vector2(0.5f, 0.5f);
+        dailyRt.anchoredPosition = new Vector2(0, -330);
+        dailyRt.sizeDelta = new Vector2(420, 84);
+
+        GameObject dailyTextObj = new GameObject("Text");
+        dailyTextObj.transform.SetParent(dailyObj.transform, false);
+        Text dailyLabel = dailyTextObj.AddComponent<Text>();
+        ArabicUI.Apply(dailyLabel, true);
+        dailyLabel.text = ArabicStrings.DailyButton;
+        dailyLabel.fontSize = 32;
+        dailyLabel.color = Color.white;
+        dailyLabel.alignment = TextAnchor.MiddleCenter;
+        RectTransform dtrt = dailyLabel.rectTransform;
+        dtrt.anchorMin = Vector2.zero;
+        dtrt.anchorMax = Vector2.one;
+        dtrt.offsetMin = Vector2.zero;
+        dtrt.offsetMax = Vector2.zero;
+
+        dailyGiftButton = dailyBtn;
+        dailyGiftLabel = dailyLabel;
+        RefreshDailyGiftButton();
+
+        dailyBtn.onClick.AddListener(() =>
+        {
+            if (GameFeatures.instance == null) return;
+            GameFeatures.instance.ClaimDailyGift();
+            RefreshDailyGiftButton();
+        });
+    }
+
+    private void RefreshDailyGiftButton()
+    {
+        if (dailyGiftButton == null || dailyGiftLabel == null || GameFeatures.instance == null) return;
+        bool claimed = GameFeatures.instance.IsDailyClaimed();
+        dailyGiftLabel.text = claimed ? ArabicStrings.DailyClaimedButton : ArabicStrings.DailyButton;
+        dailyGiftButton.interactable = !claimed;
     }
 
     private void SetupHypeUI(Transform parent)
@@ -613,6 +683,29 @@ public class UIManager : MonoBehaviour
         comboRt.anchoredPosition = new Vector2(520, -120);
         comboRt.sizeDelta = new Vector2(420, 120);
         comboObj.SetActive(false);
+
+        // Buff / event / achievement toasts (above the kill feed, below the announcement).
+        buffText = CreateToastText(parent, "BuffText", new Vector2(0, 430), new Vector2(1200, 60), 34, new Color(0.4f, 0.95f, 1f));
+        eventTimerText = CreateToastText(parent, "EventTimerText", new Vector2(0, 385), new Vector2(1200, 60), 32, new Color(1f, 0.5f, 0.9f));
+        achievementText = CreateToastText(parent, "AchievementText", new Vector2(0, 340), new Vector2(1300, 70), 36, new Color(1f, 0.85f, 0.2f));
+    }
+
+    private Text CreateToastText(Transform parent, string name, Vector2 pos, Vector2 size, int fontSize, Color color)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        Text text = obj.AddComponent<Text>();
+        ArabicUI.Apply(text, true);
+        text.fontSize = fontSize;
+        text.color = new Color(color.r, color.g, color.b, 0f);
+        text.alignment = TextAnchor.MiddleCenter;
+        text.raycastTarget = false;
+        RectTransform rt = text.rectTransform;
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+        return text;
     }
 
     public void ShowKillMessage(string message)
@@ -632,6 +725,36 @@ public class UIManager : MonoBehaviour
         comboText.rectTransform.localScale = Vector3.one * 1.35f;
         comboText.color = new Color(1f, 0.75f, 0f, 1f);
         comboTimer = 1.6f;
+    }
+
+    public void ShowBuff(string label, float seconds)
+    {
+        if (buffText == null) return;
+        buffText.text = label;
+        Color c = buffText.color;
+        c.a = 1f;
+        buffText.color = c;
+        buffTimer = seconds;
+    }
+
+    public void ShowEventTimer(string label, float seconds)
+    {
+        if (eventTimerText == null) return;
+        eventTimerText.text = label;
+        Color c = eventTimerText.color;
+        c.a = 1f;
+        eventTimerText.color = c;
+        eventTimerTimer = seconds;
+    }
+
+    public void ShowAchievement(string label)
+    {
+        if (achievementText == null) return;
+        achievementText.text = ArabicUI.Format(ArabicStrings.AchievementToast, label);
+        Color c = achievementText.color;
+        c.a = 1f;
+        achievementText.color = c;
+        achievementTimer = 3.2f;
     }
 
     private void SetupMobileControls(Transform parent)

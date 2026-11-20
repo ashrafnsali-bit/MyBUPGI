@@ -393,7 +393,8 @@ public class GunScript : MonoBehaviour {
 			}
 		}
         wasFiringMobile = UIManager.MobileIsFiring;
-		waitTillNextFire -= roundsPerSecond * Time.deltaTime;
+		float fireRate = roundsPerSecond * (GameFeatures.instance != null ? GameFeatures.instance.FireRateMultiplier : 1f);
+		waitTillNextFire -= fireRate * Time.deltaTime;
 	}
 
 
@@ -485,14 +486,15 @@ public class GunScript : MonoBehaviour {
 					if (Physics.Raycast(ray, out hit, 2000f, hitscanMask, QueryTriggerInteraction.Ignore)) {
 						targetPoint = hit.point;
 						
-						// DEAL DAMAGE INSTANTLY
+						// DEAL DAMAGE INSTANTLY (gift buff can double it)
+						float effectiveDamage = damage * (GameFeatures.instance != null ? GameFeatures.instance.DamageMultiplier : 1f);
 						bool hitEnemy = false;
 						EnemyAI enemy = hit.transform.GetComponentInParent<EnemyAI>();
 						if (enemy != null) {
-							enemy.TakeDamage(damage);
+							enemy.TakeDamage(effectiveDamage);
 							hitEnemy = true;
 						} else if (hit.transform.tag == "Enemy" || hit.transform.tag == "Dummie" || hit.transform.tag == "ExplosiveBarrel") {
-							hit.transform.SendMessage("TakeDamage", damage, SendMessageOptions.DontRequireReceiver);
+							hit.transform.SendMessage("TakeDamage", effectiveDamage, SendMessageOptions.DontRequireReceiver);
 							hitEnemy = true;
 						}
 
@@ -500,7 +502,7 @@ public class GunScript : MonoBehaviour {
 							// UI Feedback
 							if (UIManager.instance != null) UIManager.instance.ShowHitMarker();
 							GunScript.HitMarkerSound();
-							FloatingDamage.Create(hit.point, (int)damage);
+							FloatingDamage.Create(hit.point, (int)effectiveDamage);
 							
 							// Try to get Blood Effect from bullet prefab
 							BulletScript bsPrefab = bullet.GetComponent<BulletScript>();

@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerMovementScript : MonoBehaviour {
+	[Tooltip("Temporary speed buff multiplier (1 = normal). Do not change maxSpeed.")]
+	public float speedMultiplier = 1f;
+
 	Rigidbody rb;
 
 	[Tooltip("Current players speed")]
@@ -90,7 +93,8 @@ public class PlayerMovementScript : MonoBehaviour {
 		moveDirection.y = 0;
 		if (moveDirection.sqrMagnitude > 1f) moveDirection.Normalize();
 
-		float targetSpeed = Input.GetKey(KeyCode.LeftShift) ? 11f : 7f; // Sprint vs Walk speed
+		// speedMultiplier is driven by temporary power-ups (never touch maxSpeed: the gun reads it).
+		float targetSpeed = (Input.GetKey(KeyCode.LeftShift) ? 11f : 7f) * speedMultiplier;
 		Vector3 targetVelocity = moveDirection * targetSpeed;
 
 		Vector3 currentVel = rb.linearVelocity;

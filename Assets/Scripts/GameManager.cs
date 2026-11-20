@@ -48,6 +48,13 @@ public class GameManager : MonoBehaviour
         instance = this;
         bestKills = PlayerPrefs.GetInt("MyBUPGI_BestKills", 0);
         bestScore = PlayerPrefs.GetInt("MyBUPGI_BestScore", 0);
+
+        // Surprise & gifts layer (self-contained; no scene setup required).
+        if (Object.FindFirstObjectByType<GameFeatures>() == null)
+        {
+            GameObject features = new GameObject("GameFeatures");
+            features.AddComponent<GameFeatures>();
+        }
     }
 
     void Start()
@@ -332,6 +339,7 @@ public class GameManager : MonoBehaviour
 
     public void ShowAnnouncement(string message, float duration)
     {
+        if (announcementText == null || announcementCanvasGroup == null) return;
         // Avoid two banners fighting over the same CanvasGroup (e.g. a reward on a kill
         // that happens while the next-level banner is still fading).
         if (announcementRoutine != null) StopCoroutine(announcementRoutine);
@@ -371,6 +379,8 @@ public class GameManager : MonoBehaviour
         
         // Increment Level
         currentLevel++;
+        if (GameFeatures.instance != null)
+            GameFeatures.instance.CheckAchievements(totalKills, comboCount, currentLevel);
         int enemiesToSpawn = enemiesPerWaveBase + ((currentLevel - 1) * extraEnemiesPerLevel);
         
         // Announce next level
@@ -427,6 +437,39 @@ public class GameManager : MonoBehaviour
             totalEnemies++;
             yield return new WaitForSeconds(Random.Range(0.5f, 1.5f)); // Staggered spawn
         }
+    }
+
+    // Called by surprise events: an extra wave without waiting for the next level.
+    public void SpawnBonusEnemies(int count)
+    {
+        if (!isGameOver) StartCoroutine(SpawnEnemies(count));
+    }
+
+    // Called by surprise events: a golden, much tougher enemy worth bonus score.
+    public void SpawnEliteEnemy()
+    {
+        if (isGameOver || enemyPrefabTemplate == null) return;
+
+        Vector3 spawnPos = GetRandomSpawnPosition();
+        GameObject elite = Instantiate(enemyPrefabTemplate, spawnPos, Quaternion.identity);
+        elite.SetActive(true);
+        elite.name = "EliteEnemy_" + currentLevel;
+
+        EnemyAI ai = elite.GetComponent<EnemyAI>();
+        if (ai != null)
+        {
+            ai.isElite = true;
+            ai.archetype = EnemyArchetype.Tank;
+            ai.ApplyArchetype();
+        }
+
+        elite.transform.localScale = Vector3.one * 1.25f;
+        foreach (Renderer r in elite.GetComponentsInChildren<Renderer>())
+        {
+            if (r != null) r.material.color = new Color(1f, 0.78f, 0.15f);
+        }
+
+        totalEnemies++;
     }
 
     Vector3 GetRandomSpawnPosition()
@@ -509,7 +552,7 @@ public class GameManager : MonoBehaviour
         Debug.Log("GameManager: Found " + totalEnemies + " active enemies.");
     }
 
-    public void EnemyDied()
+    public void EnemyDied(bool elite = false)
     {
         if (isGameOver) return;
 
@@ -522,12 +565,26 @@ public class GameManager : MonoBehaviour
         if (totalKills > 0 && totalKills % killsPerReward == 0)
             GrantKillMilestoneReward(totalKills / killsPerReward);
 
-        // Combo: kills inside the window stack a score multiplier.
+        // Combo kills stack, and a surprise "double points" event can stack on top.
         float now = Time.realtimeSinceStartup;
         comboCount = (now - lastKillTime <= comboWindow) ? comboCount + 1 : 1;
         lastKillTime = now;
         int multiplier = Mathf.Clamp(comboCount, 1, 5);
+        if (GameFeatures.instance != null) multiplier = Mathf.RoundToInt(multiplier * GameFeatures.instance.ScoreMultiplier);
         score += 100 * multiplier;
+
+        if (elite)
+        {
+            const int eliteBonus = 1000;
+            score += eliteBonus;
+            ShowAnnouncement(ArabicUI.Format(ArabicStrings.EliteKilled, eliteBonus), 2.6f);
+        }
+
+        if (GameFeatures.instance != null)
+        {
+            GameFeatures.instance.NotifyEnemyKilled();
+            GameFeatures.instance.CheckAchievements(totalKills, comboCount, currentLevel);
+        }
 
         if (UIManager.instance != null)
         {
@@ -652,6 +709,12 @@ public class GameManager : MonoBehaviour
     {
         string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
         string message = "MYBUPGI - " + stats + " #MyBUPGI";
+        if (GameFeatures.instance != null)
+        {
+            string achievements = GameFeatures.instance.GetAchievementSummary();
+            if (!string.IsNullOrEmpty(achievements))
+                message += "\n" + ArabicUI.Format(ArabicStrings.ShareAchievements, achievements);
+        }
         try { GUIUtility.systemCopyBuffer = message; } catch (System.Exception) { }
         Application.OpenURL("https://wa.me/?text=" + System.Uri.EscapeDataString(message));
     }

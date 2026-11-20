@@ -9,6 +9,8 @@ public class EnemyAI : MonoBehaviour
 {
     [Header("AI Archetype")]
     public EnemyArchetype archetype = EnemyArchetype.Assaulter;
+    [Tooltip("Elite enemies are tougher, hit harder and award bonus score.")]
+    public bool isElite = false;
 
     [Header("Stats")]
     public float health = 100;
@@ -193,6 +195,17 @@ public class EnemyAI : MonoBehaviour
                 fieldOfView = 110f; hearingRadius = 14f; preferredRange = 15f; reactionTime = 0.30f;
                 coverSearchRadius = 8f; flankDistance = 6f;
                 break;
+        }
+
+        if (isElite)
+        {
+            // Absolute values keep this idempotent: Awake/Start both call ApplyArchetype().
+            health = Mathf.Max(health, 320f);
+            damage = Mathf.Max(damage, 7f);
+            moveSpeed = Mathf.Max(moveSpeed, 7.5f);
+            fireRate = Mathf.Max(fireRate, 3.2f);
+            reactionTime = Mathf.Min(reactionTime, 0.2f);
+            retreatHealthThreshold = 0f;
         }
 
         attackHysteresis = 5f;
@@ -989,7 +1002,7 @@ public class EnemyAI : MonoBehaviour
         SafeSetAnimTrigger(dieTrigger);
         if (deathEffect != null) Instantiate(deathEffect, transform.position, transform.rotation);
 
-        if (GameManager.instance != null) GameManager.instance.EnemyDied();
+        if (GameManager.instance != null) GameManager.instance.EnemyDied(isElite);
         if (PlayerAbilities.instance != null) PlayerAbilities.instance.OnEnemyKilled();
 
         if (Random.value <= healthDropChance) DropHealthPickup();
