@@ -23,6 +23,15 @@ public class EnemyAI : MonoBehaviour
     public float rotationSpeed = 14f;
     public float fireRate = 2.5f;
 
+    [Header("Difficulty scaling (set by LevelDirector)")]
+    public float healthScale = 1f;
+    public float damageScale = 1f;
+    public float speedScale = 1f;
+    public float fireRateScale = 1f;
+
+    // Captured before the first ApplyArchetype call; keeps scaling idempotent.
+    private float baseHealth = -1f;
+
     [Header("Perception")]
     [Tooltip("Full cone angle in degrees. Alerted enemies get a wider awareness cone.")]
     public float fieldOfView = 110f;
@@ -147,6 +156,7 @@ public class EnemyAI : MonoBehaviour
 
         if (GetComponent<EnemyWeaponSetup>() == null) gameObject.AddComponent<EnemyWeaponSetup>();
         EnsureFirePoint();
+        if (baseHealth <= 0f) baseHealth = health > 0f ? health : 100f;
         ApplyArchetype();
     }
 
@@ -163,8 +173,11 @@ public class EnemyAI : MonoBehaviour
     /// <summary>Re-applies archetype stats. Called after GameManager changes the archetype on a spawned clone.</summary>
     public void ApplyArchetype()
     {
-        health = Mathf.Max(health, 70f);
+        // Reset to canonical values first: ApplyArchetype runs in Awake, Start and
+        // again when GameManager assigns a level plan. Scaling below must not stack.
+        health = baseHealth > 0f ? baseHealth : 100f;
         damage = Mathf.Clamp(damage, 2f, 8f);
+        if (baseHealth <= 0f) baseHealth = health;
         retreatHealthThreshold = Mathf.Clamp(retreatHealthThreshold, 0f, 0.5f);
 
         switch (archetype)
@@ -207,6 +220,13 @@ public class EnemyAI : MonoBehaviour
             reactionTime = Mathf.Min(reactionTime, 0.2f);
             retreatHealthThreshold = 0f;
         }
+
+        // LevelDirector scaling: higher levels hit harder, move faster and survive longer.
+        // Applied after the archetype/elite values so every call produces the same result.
+        health *= Mathf.Max(1f, healthScale);
+        damage = Mathf.Clamp(damage * Mathf.Max(1f, damageScale), 2f, 12f);
+        moveSpeed *= Mathf.Max(1f, speedScale);
+        fireRate = Mathf.Clamp(fireRate * Mathf.Max(1f, fireRateScale), 0.5f, 8f);
 
         attackHysteresis = 5f;
         alertRadius = 35f;

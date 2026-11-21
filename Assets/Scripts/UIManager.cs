@@ -575,6 +575,26 @@ public class UIManager : MonoBehaviour
         controlsRt.anchoredPosition = new Vector2(0, -60);
         controlsRt.sizeDelta = new Vector2(1600, 120);
 
+        // Progress hint: the run resumes at the level after the last cleared one.
+        int lastCleared = LevelDirector.LastClearedLevel;
+        if (lastCleared > 0)
+        {
+            GameObject resumeObj = new GameObject("ResumeText");
+            resumeObj.transform.SetParent(startOverlay.transform, false);
+            Text resume = resumeObj.AddComponent<Text>();
+            ArabicUI.Apply(resume, true);
+            resume.text = ArabicUI.Format(ArabicStrings.ResumeLevel, lastCleared + 1);
+            resume.fontSize = 30;
+            resume.color = new Color(1f, 0.78f, 0.15f, 1f);
+            resume.alignment = TextAnchor.MiddleCenter;
+            resume.raycastTarget = false;
+            RectTransform resumeRt = resume.rectTransform;
+            resumeRt.anchorMin = new Vector2(0.5f, 0.5f);
+            resumeRt.anchorMax = new Vector2(0.5f, 0.5f);
+            resumeRt.anchoredPosition = new Vector2(0, -145);
+            resumeRt.sizeDelta = new Vector2(1200, 50);
+        }
+
         GameObject playObj = new GameObject("PlayButton");
         playObj.transform.SetParent(startOverlay.transform, false);
         Image playImg = playObj.AddComponent<Image>();

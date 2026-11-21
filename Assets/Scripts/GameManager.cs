@@ -49,6 +49,16 @@ public class GameManager : MonoBehaviour
         bestKills = PlayerPrefs.GetInt("MyBUPGI_BestKills", 0);
         bestScore = PlayerPrefs.GetInt("MyBUPGI_BestScore", 0);
 
+        // Resume at the level after the last one the player cleared.
+        currentLevel = Mathf.Clamp(LevelDirector.LastClearedLevel + 1, 1, 999);
+
+        // Procedural level director + surprise & gifts layer (self-contained).
+        if (Object.FindFirstObjectByType<LevelDirector>() == null)
+        {
+            GameObject director = new GameObject("LevelDirector");
+            director.AddComponent<LevelDirector>();
+        }
+
         // Surprise & gifts layer (self-contained; no scene setup required).
         if (Object.FindFirstObjectByType<GameFeatures>() == null)
         {
@@ -104,15 +114,18 @@ public class GameManager : MonoBehaviour
         SetupGameUI();
         RefreshEnemyCount();
         
-        // If there are no enemies in the scene, start level 1 immediately
-        if (totalEnemies == 0)
-        {
-            StartCoroutine(SpawnEnemies(enemiesPerWaveBase));
-        }
-        else
-        {
-            ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelStart, currentLevel), 3f);
-        }
+        // Build a fresh plan for this level (different style/roster than the last one).
+        LevelPlan plan = LevelDirector.instance != null ? LevelDirector.instance.BuildPlan(currentLevel) : null;
+        int initialEnemies = plan != null ? plan.enemyCount : enemiesPerWaveBase;
+
+        string startMessage = currentLevel > 1
+            ? ArabicUI.Format(ArabicStrings.ResumeLevel, currentLevel)
+            : (plan != null
+                ? ArabicUI.Format(ArabicStrings.LevelStartStyled, currentLevel, plan.StyleName)
+                : ArabicUI.Format(ArabicStrings.AnnounceLevelStart, currentLevel));
+
+        if (totalEnemies == 0) StartCoroutine(SpawnEnemies(initialEnemies));
+        ShowAnnouncement(startMessage, 3f);
     }
 
     void SetupGameUI()
@@ -375,16 +388,26 @@ public class GameManager : MonoBehaviour
         // Announce completion + the reward earned for clearing this level.
         string rewardMessage = GrantLevelCompleteReward(currentLevel);
         ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelComplete, currentLevel) + "\n" + rewardMessage, 3.5f);
+
+        // Persist progress: a reload always resumes at the level after this one.
+        LevelDirector.SaveClearedLevel(currentLevel);
         yield return new WaitForSeconds(4f);
-        
-        // Increment Level
+
+        // Increment Level and generate a brand-new plan for it.
         currentLevel++;
         if (GameFeatures.instance != null)
             GameFeatures.instance.CheckAchievements(totalKills, comboCount, currentLevel);
-        int enemiesToSpawn = enemiesPerWaveBase + ((currentLevel - 1) * extraEnemiesPerLevel);
-        
-        // Announce next level
-        ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceNextLevel, currentLevel), 2f);
+
+        LevelPlan nextPlan = LevelDirector.instance != null ? LevelDirector.instance.BuildPlan(currentLevel) : null;
+        int enemiesToSpawn = nextPlan != null
+            ? nextPlan.enemyCount
+            : enemiesPerWaveBase + ((currentLevel - 1) * extraEnemiesPerLevel);
+
+        // Announce next level and its style so the variation is visible.
+        string nextMessage = nextPlan != null
+            ? ArabicUI.Format(ArabicStrings.LevelStartStyled, currentLevel, nextPlan.StyleName)
+            : ArabicUI.Format(ArabicStrings.AnnounceNextLevel, currentLevel);
+        ShowAnnouncement(nextMessage, 2f);
         yield return new WaitForSeconds(2.5f);
         
         // Start spawning
@@ -400,42 +423,56 @@ public class GameManager : MonoBehaviour
             yield break;
         }
 
-        for (int i = 0; i < count; i++)
-        {
-            if (isGameOver) break;
+        LevelPlan plan = LevelDirector.instance != null ? LevelDirector.instance.current : null;
+        int elitesSpawned = 0;
+        int eliteLimit = plan != null ? Mathf.Max(1, plan.level / 4) : 1;
+        int spawned = 0;
 
-            Vector3 spawnPos = GetRandomSpawnPosition();
-            GameObject newEnemy = Instantiate(enemyPrefabTemplate, spawnPos, Quaternion.identity);
-            newEnemy.SetActive(true);
-            newEnemy.name = "LevelEnemy_" + currentLevel + "_" + i;
-            
-            // Randomize Archetype based on level progression
-            EnemyAI ai = newEnemy.GetComponent<EnemyAI>();
-            if (ai != null)
+        while (spawned < count && !isGameOver)
+        {
+            // Higher levels arrive in bursts instead of a slow single-file trickle.
+            int burst = plan != null ? Mathf.Min(plan.burstSize, count - spawned) : 1;
+            for (int b = 0; b < burst && spawned < count; b++, spawned++)
             {
-                float rand = Random.value;
-                if (currentLevel >= 3)
+                Vector3 spawnPos = plan != null
+                    ? GetRandomSpawnPosition(plan.pattern, plan.minDistance, plan.maxDistance)
+                    : GetRandomSpawnPosition();
+
+                GameObject newEnemy = Instantiate(enemyPrefabTemplate, spawnPos, Quaternion.identity);
+                newEnemy.SetActive(true);
+                newEnemy.name = "LevelEnemy_" + currentLevel + "_" + spawned;
+
+                EnemyAI ai = newEnemy.GetComponent<EnemyAI>();
+                if (ai != null)
                 {
-                    if (rand < 0.15f) ai.archetype = EnemyArchetype.Tank;
-                    else if (rand < 0.35f) ai.archetype = EnemyArchetype.Grenadier;
-                    else if (rand < 0.55f) ai.archetype = EnemyArchetype.Rusher;
-                    else if (rand < 0.75f) ai.archetype = EnemyArchetype.Sniper;
-                    else ai.archetype = EnemyArchetype.Assaulter;
+                    if (plan != null)
+                    {
+                        ai.archetype = plan.ArchetypeAt(spawned);
+                        ai.isElite = false;
+                        ai.healthScale = plan.healthScale;
+                        ai.damageScale = plan.damageScale;
+                        ai.speedScale = plan.speedScale;
+                        ai.fireRateScale = plan.fireRateScale;
+                        if (elitesSpawned < eliteLimit && Random.value < plan.eliteChance)
+                        {
+                            ai.isElite = true;
+                            elitesSpawned++;
+                        }
+                        ai.ApplyArchetype();
+                    }
+                    else
+                    {
+                        // Legacy fallback when no director is present.
+                        ai.archetype = EnemyArchetype.Assaulter;
+                    }
                 }
-                else if (currentLevel >= 2)
-                {
-                    if (rand < 0.2f) ai.archetype = EnemyArchetype.Rusher;
-                    else if (rand < 0.4f) ai.archetype = EnemyArchetype.Sniper;
-                    else ai.archetype = EnemyArchetype.Assaulter;
-                }
-                else
-                {
-                    ai.archetype = EnemyArchetype.Assaulter; // Level 1 is basic enemies only
-                }
+
+                totalEnemies++;
             }
-            
-            totalEnemies++;
-            yield return new WaitForSeconds(Random.Range(0.5f, 1.5f)); // Staggered spawn
+
+            float waitMin = plan != null ? plan.delayMin : 0.5f;
+            float waitMax = plan != null ? plan.delayMax : 1.5f;
+            yield return new WaitForSeconds(Random.Range(waitMin, waitMax));
         }
     }
 
@@ -458,8 +495,13 @@ public class GameManager : MonoBehaviour
         EnemyAI ai = elite.GetComponent<EnemyAI>();
         if (ai != null)
         {
+            LevelPlan plan = LevelDirector.instance != null ? LevelDirector.instance.current : null;
             ai.isElite = true;
-            ai.archetype = EnemyArchetype.Tank;
+            ai.archetype = plan != null ? plan.RandomArchetype() : EnemyArchetype.Tank;
+            ai.healthScale = plan != null ? plan.healthScale : 1f;
+            ai.damageScale = plan != null ? plan.damageScale : 1f;
+            ai.speedScale = plan != null ? plan.speedScale : 1f;
+            ai.fireRateScale = plan != null ? plan.fireRateScale : 1f;
             ai.ApplyArchetype();
         }
 
@@ -474,25 +516,32 @@ public class GameManager : MonoBehaviour
 
     Vector3 GetRandomSpawnPosition()
     {
+        return GetRandomSpawnPosition(SpawnPattern.Ring, 18f, 35f);
+    }
+
+    /// <summary>Spawn point chosen by the level plan: ring, flank, behind or long range.</summary>
+    Vector3 GetRandomSpawnPosition(SpawnPattern pattern, float minDist, float maxDist)
+    {
         if (player == null) return Vector3.zero;
 
-        // Try to find a valid open spawn point between 18m and 35m from player
+        minDist = Mathf.Max(6f, minDist);
+        maxDist = Mathf.Max(minDist + 2f, maxDist);
+        float facing = player.eulerAngles.y;
+
         UnityEngine.AI.NavMeshPath testPath = new UnityEngine.AI.NavMeshPath();
         for (int i = 0; i < 40; i++)
         {
-            float angle = Random.Range(0, 360) * Mathf.Deg2Rad;
-            float distance = Random.Range(18f, 35f);
-            Vector3 candidatePos = player.position + new Vector3(Mathf.Cos(angle) * distance, 0, Mathf.Sin(angle) * distance);
+            float angle = PickSpawnAngle(pattern, facing) * Mathf.Deg2Rad;
+            float distance = pattern == SpawnPattern.Far ? maxDist : Random.Range(minDist, maxDist);
+            Vector3 candidatePos = player.position + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
 
             UnityEngine.AI.NavMeshHit navHit;
             if (UnityEngine.AI.NavMesh.SamplePosition(candidatePos, out navHit, 6.0f, UnityEngine.AI.NavMesh.AllAreas))
             {
-                if (Vector3.Distance(navHit.position, player.position) >= 15f)
+                if (Vector3.Distance(navHit.position, player.position) >= minDist - 3f)
                 {
-                    // Ensure the spawn point is NOT inside or near any container, tank, or hangar
                     if (!IsInsideOrNearContainer(navHit.position))
                     {
-                        // Ensure candidate position has an unobstructed path to the player
                         if (UnityEngine.AI.NavMesh.CalculatePath(navHit.position, player.position, UnityEngine.AI.NavMesh.AllAreas, testPath) &&
                             testPath.status == UnityEngine.AI.NavMeshPathStatus.PathComplete)
                         {
@@ -503,11 +552,12 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // Fallback: spawn at a safe 22m distance in a random direction away from containers, tanks, and hangars
+        // Fallback: keep the pattern direction but relax the distance constraint.
         for (int i = 0; i < 20; i++)
         {
-            float fallbackAngle = Random.Range(0, 360) * Mathf.Deg2Rad;
-            Vector3 fallbackPos = player.position + new Vector3(Mathf.Cos(fallbackAngle) * 22f, 0.5f, Mathf.Sin(fallbackAngle) * 22f);
+            float angle = PickSpawnAngle(pattern, facing) * Mathf.Deg2Rad;
+            float distance = pattern == SpawnPattern.Far ? maxDist : Mathf.Clamp(22f, minDist, maxDist);
+            Vector3 fallbackPos = player.position + new Vector3(Mathf.Cos(angle) * distance, 0.5f, Mathf.Sin(angle) * distance);
             UnityEngine.AI.NavMeshHit navHit;
             if (UnityEngine.AI.NavMesh.SamplePosition(fallbackPos, out navHit, 8.0f, UnityEngine.AI.NavMesh.AllAreas))
             {
@@ -530,6 +580,19 @@ public class GameManager : MonoBehaviour
             return safePos;
         }
         return finalPos;
+    }
+
+    static float PickSpawnAngle(SpawnPattern pattern, float facingDegrees)
+    {
+        switch (pattern)
+        {
+            case SpawnPattern.Flank:
+                return facingDegrees + (Random.value < 0.5f ? 90f : 270f) + Random.Range(-35f, 35f);
+            case SpawnPattern.Behind:
+                return facingDegrees + 180f + Random.Range(-50f, 50f);
+            default:
+                return Random.Range(0f, 360f);
+        }
     }
 
     public static bool IsInsideOrNearContainer(Vector3 pos)
@@ -702,13 +765,15 @@ public class GameManager : MonoBehaviour
     {
         string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
         string record = IsNewRecord() ? "\n" + ArabicStrings.NewRecord : "";
-        return ArabicStrings.GameOverTitle + "\n" + stats + record;
+        string progress = "\n" + ArabicUI.Format(ArabicStrings.LastCleared, LevelDirector.LastClearedLevel);
+        return ArabicStrings.GameOverTitle + "\n" + stats + record + progress;
     }
 
     void ShareResult()
     {
         string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
-        string message = "MYBUPGI - " + stats + " #MyBUPGI";
+        string message = "MYBUPGI - " + stats + " #MyBUPGI\n" +
+                         ArabicUI.Format(ArabicStrings.LastCleared, LevelDirector.LastClearedLevel);
         if (GameFeatures.instance != null)
         {
             string achievements = GameFeatures.instance.GetAchievementSummary();

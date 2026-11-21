@@ -45,6 +45,15 @@ public static class ArabicStrings
     public const string AchKills50 = "ًﻼﻴﺘﻗ ﻥﻮﺴﻤﺧ";
     public const string AchKills100 = "ﻞﻴﺘﻗ ﺔﺌﻣ";
     public const string ShareAchievements = "{0} :ﻲﺗﺍﺯﺎﺠﻧﺇ";
+    public const string ResumeLevel = "{0} ﻯﻮﺘﺴﻤﻟﺍ ﻦﻣ ﻑﺎﻨﺌﺘﺳﻻﺍ";
+    public const string LevelStartStyled = "{1} — {0} ﻯﻮﺘﺴﻤﻟﺍ";
+    public const string StyleAssault = "ﺮﺷﺎﺒﻣ ﻡﻮﺠﻫ";
+    public const string StyleSwarm = "ﻊﻳﺮﺳ ﺏﺮﺳ";
+    public const string StyleSnipers = "ﺔﺻﺎﻨﻗ ﺶﻋ";
+    public const string StyleArmored = "ﺔﻋﺭﺪﻣ ﺔﻠﺘﻛ";
+    public const string StyleMixed = "ﻂﻠﺘﺨﻣ ﻞﻴﻜﺸﺗ";
+    public const string StyleAmbush = "ﺊﺟﺎﻔﻣ ﻦﻴﻤﻛ";
+    public const string LastCleared = "{0} :ﻪﺗﺯﻭﺎﺠﺗ ﻯﻮﺘﺴﻣ ﺮﺧﺁ";
     public const string HealthTemplate = "{0} :ﺔﺤﺼﻟﺍ";
     public const string GrenadesTemplate = "{0} :ﻞﺑﺎﻨﻗ";
     public const string StartSubtitle = "ﺀﺪﺒﻠﻟ ﻂﻐﺿﺍ";
