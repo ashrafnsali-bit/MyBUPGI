@@ -474,6 +474,7 @@ public class GunScript : MonoBehaviour {
 
 			if(bulletsInTheGun > 0){
 				if (GameManager.instance != null) GameManager.instance.RegisterShotFired();
+				if (MultiplayerManager.instance != null) MultiplayerManager.instance.NotifyLocalFired();
 
 				int randomNumberForMuzzelFlash = Random.Range(0,5);
 				if (bullet) {

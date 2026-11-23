@@ -75,6 +75,13 @@ public class GameManager : MonoBehaviour
             GameObject features = new GameObject("GameFeatures");
             features.AddComponent<GameFeatures>();
         }
+
+        // Co-op WebRTC Multiplayer layer (self-contained; syncs with browser PeerJS).
+        if (Object.FindFirstObjectByType<MultiplayerManager>() == null)
+        {
+            GameObject mp = new GameObject("MultiplayerManager");
+            mp.AddComponent<MultiplayerManager>();
+        }
     }
 
     void Start()
