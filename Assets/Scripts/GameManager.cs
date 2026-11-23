@@ -14,10 +14,15 @@ public class GameManager : MonoBehaviour
     public int totalKills = 0; // Added to track overall score/kills
     public int score = 0;
     public int comboCount = 0;
+    public int shotsFired = 0;
+    public int shotsHit = 0;
+    private int consecutiveHits = 0;
 
     [Header("Records")]
     public int bestKills = 0;
     public int bestScore = 0;
+
+    public const string GameUrl = "https://ashrafnsali-bit.github.io/MyBUPGI/";
 
     [Header("Combo")]
     public float comboWindow = 3f;
@@ -31,9 +36,14 @@ public class GameManager : MonoBehaviour
 
     // Modern UI Elements
     private GameObject gameCanvasObj;
+    private GameObject topHudPanel;
     private Text waveText;
     private GameObject gameOverPanel;
     private Text gameOverText;
+    private Text gameOverRecordText;
+    private Text gameOverStatsText;
+    private Text shareFeedbackText;
+    private float shareFeedbackTimer = 0f;
     private Button tryAgainButton;
     private Button shareButton;
     private CanvasGroup gameOverCanvasGroup;
@@ -125,7 +135,20 @@ public class GameManager : MonoBehaviour
                 : ArabicUI.Format(ArabicStrings.AnnounceLevelStart, currentLevel));
 
         if (totalEnemies == 0) StartCoroutine(SpawnEnemies(initialEnemies));
-        ShowAnnouncement(startMessage, 3f);
+        pendingStartAnnouncement = startMessage;
+        if (!UIManager.IsStartOverlayActive) ShowAnnouncement(startMessage, 3f);
+        GameAudio.Ensure();
+    }
+
+    private string pendingStartAnnouncement;
+
+    public void OnPlayerStartedGame()
+    {
+        if (!string.IsNullOrEmpty(pendingStartAnnouncement))
+        {
+            ShowAnnouncement(pendingStartAnnouncement, 2.8f);
+            pendingStartAnnouncement = null;
+        }
     }
 
     void SetupGameUI()
@@ -137,52 +160,49 @@ public class GameManager : MonoBehaviour
         CanvasScaler scaler = gameCanvasObj.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight = 0.5f;
         gameCanvasObj.AddComponent<GraphicRaycaster>();
 
-        // Top HUD Background Panel
+        // Top HUD Background Panel (Rounded dark-glass pill)
         GameObject topPanelObj = new GameObject("TopHUDPanel");
+        topHudPanel = topPanelObj;
         topPanelObj.transform.SetParent(gameCanvasObj.transform, false);
         Image topPanelImg = topPanelObj.AddComponent<Image>();
-        topPanelImg.color = new Color(0.05f, 0.05f, 0.05f, 0.85f); // Sleek dark background
+        UIStyle.StyleCard(topPanelImg, new Color(0.05f, 0.08f, 0.13f, 0.84f));
         RectTransform topRt = topPanelObj.GetComponent<RectTransform>();
-        topRt.anchorMin = new Vector2(0, 1);   // Top-Left
-        topRt.anchorMax = new Vector2(0, 1);   // Top-Left
-        topRt.pivot = new Vector2(0, 1);       // Pivot at Top-Left
-        topRt.anchoredPosition = new Vector2(20, -20); // 20px margin from top-left corner
-        topRt.sizeDelta = new Vector2(900, 100); // Wide enough for all four HUD stats (no overflow off-screen)
+        topRt.anchorMin = new Vector2(0.015f, 1f);
+        topRt.anchorMax = new Vector2(0.55f, 1f);
+        topRt.pivot = new Vector2(0f, 1f);
+        topRt.offsetMin = new Vector2(0f, -84f);
+        topRt.offsetMax = new Vector2(0f, -18f);
 
         // Golden Accent Line at the bottom of the panel
         GameObject accentObj = new GameObject("AccentLine");
         accentObj.transform.SetParent(topPanelObj.transform, false);
         Image accentImg = accentObj.AddComponent<Image>();
-        accentImg.color = new Color(1f, 0.75f, 0f, 1f); // Vibrant Gold
+        accentImg.color = new Color(1f, 0.78f, 0.15f, 0.95f);
         RectTransform accRt = accentObj.GetComponent<RectTransform>();
-        accRt.anchorMin = new Vector2(0, 0);
-        accRt.anchorMax = new Vector2(1, 0);
+        accRt.anchorMin = new Vector2(0.03f, 0);
+        accRt.anchorMax = new Vector2(0.97f, 0);
         accRt.pivot = new Vector2(0.5f, 0);
         accRt.offsetMin = new Vector2(0, 0);
-        accRt.offsetMax = new Vector2(0, 4); // 4px thick line
+        accRt.offsetMax = new Vector2(0, 3);
 
-        // Wave Text
+        // Wave Text (Crisp Arabic with overflow enabled so glyphs never clip)
         GameObject waveObj = new GameObject("WaveText");
         waveObj.transform.SetParent(topPanelObj.transform, false);
         waveText = waveObj.AddComponent<Text>();
-        ArabicUI.Apply(waveText, true);
-        waveText.fontSize = 28;
-        waveText.fontStyle = FontStyle.Bold;
-        waveText.color = Color.white;
-        waveText.alignment = TextAnchor.MiddleCenter;
-        waveText.horizontalOverflow = HorizontalWrapMode.Overflow;
-        waveText.verticalOverflow = VerticalWrapMode.Overflow;
+        UIStyle.ConfigureArabicText(waveText, 24, Color.white, true);
+        waveText.resizeTextForBestFit = true;
+        waveText.resizeTextMinSize = 14;
+        waveText.resizeTextMaxSize = 24;
+        waveText.horizontalOverflow = HorizontalWrapMode.Wrap;
         RectTransform wrt = waveText.GetComponent<RectTransform>();
         wrt.anchorMin = new Vector2(0, 0);
         wrt.anchorMax = new Vector2(1, 1);
         wrt.pivot = new Vector2(0.5f, 0.5f);
-        wrt.offsetMin = new Vector2(10, 10);
-        wrt.offsetMax = new Vector2(-10, -10);
-        Outline wOut = waveObj.AddComponent<Outline>();
-        wOut.effectColor = new Color(0, 0, 0, 1f);
-        wOut.effectDistance = new Vector2(2, -2);
+        wrt.offsetMin = new Vector2(16, 6);
+        wrt.offsetMax = new Vector2(-16, -6);
 
         // Announcement Text
         GameObject annObj = new GameObject("AnnouncementText");
@@ -205,11 +225,11 @@ public class GameManager : MonoBehaviour
         announcementCanvasGroup = annObj.AddComponent<CanvasGroup>();
         announcementCanvasGroup.alpha = 0f;
 
-        // Game Over Panel
+        // Game Over Backdrop
         gameOverPanel = new GameObject("GameOverPanel");
         gameOverPanel.transform.SetParent(gameCanvasObj.transform, false);
         Image panelImg = gameOverPanel.AddComponent<Image>();
-        panelImg.color = new Color(0, 0, 0, 0.85f); // Dark background
+        panelImg.color = new Color(0.03f, 0.04f, 0.08f, 0.86f);
         RectTransform prt = gameOverPanel.GetComponent<RectTransform>();
         prt.anchorMin = Vector2.zero;
         prt.anchorMax = Vector2.one;
@@ -217,88 +237,151 @@ public class GameManager : MonoBehaviour
         prt.offsetMax = Vector2.zero;
         
         gameOverCanvasGroup = gameOverPanel.AddComponent<CanvasGroup>();
-        gameOverCanvasGroup.alpha = 0f; // Hidden initially
+        gameOverCanvasGroup.alpha = 0f;
         gameOverPanel.SetActive(false);
 
-        // Game Over Text
-        GameObject goTextObj = new GameObject("GameOverText");
-        goTextObj.transform.SetParent(gameOverPanel.transform, false);
-        gameOverText = goTextObj.AddComponent<Text>();
-        ArabicUI.Apply(gameOverText, true);
-        gameOverText.fontSize = 76;
-        gameOverText.fontStyle = FontStyle.Bold;
-        gameOverText.alignment = TextAnchor.MiddleCenter;
-        RectTransform gort = gameOverText.GetComponent<RectTransform>();
-        gort.anchorMin = new Vector2(0.5f, 0.5f);
-        gort.anchorMax = new Vector2(0.5f, 0.5f);
-        gort.anchoredPosition = new Vector2(0, 100);
-        gort.sizeDelta = new Vector2(800, 200);
-        Outline goOut = goTextObj.AddComponent<Outline>();
-        goOut.effectColor = Color.black;
-        goOut.effectDistance = new Vector2(3, -3);
+        // Sleek Centered Game Over Modal Card
+        GameObject modalObj = new GameObject("GameOverModalCard");
+        modalObj.transform.SetParent(gameOverPanel.transform, false);
+        Image modalImg = modalObj.AddComponent<Image>();
+        UIStyle.StyleCard(modalImg, new Color(0.07f, 0.10f, 0.16f, 0.96f));
+        RectTransform modalRt = modalObj.GetComponent<RectTransform>();
+        modalRt.anchorMin = new Vector2(0.5f, 0.5f);
+        modalRt.anchorMax = new Vector2(0.5f, 0.5f);
+        modalRt.anchoredPosition = Vector2.zero;
+        modalRt.sizeDelta = new Vector2(720, 560);
 
-        // Try Again Button
+        GameObject modalAccent = new GameObject("ModalAccent");
+        modalAccent.transform.SetParent(modalObj.transform, false);
+        Image maImg = modalAccent.AddComponent<Image>();
+        maImg.color = new Color(1f, 0.35f, 0.25f, 1f);
+        RectTransform maRt = modalAccent.GetComponent<RectTransform>();
+        maRt.anchorMin = new Vector2(0.06f, 1f);
+        maRt.anchorMax = new Vector2(0.94f, 1f);
+        maRt.pivot = new Vector2(0.5f, 1f);
+        maRt.offsetMin = new Vector2(0, -4);
+        maRt.offsetMax = Vector2.zero;
+
+        // Game Over Title
+        GameObject goTextObj = new GameObject("GameOverText");
+        goTextObj.transform.SetParent(modalObj.transform, false);
+        gameOverText = goTextObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(gameOverText, 58, new Color(1f, 0.36f, 0.28f, 1f), true);
+        RectTransform gort = gameOverText.GetComponent<RectTransform>();
+        gort.anchorMin = new Vector2(0.5f, 1f);
+        gort.anchorMax = new Vector2(0.5f, 1f);
+        gort.anchoredPosition = new Vector2(0, -68);
+        gort.sizeDelta = new Vector2(640, 80);
+
+        // New Record Badge
+        GameObject recObj = new GameObject("GameOverRecordText");
+        recObj.transform.SetParent(modalObj.transform, false);
+        gameOverRecordText = recObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(gameOverRecordText, 28, new Color(1f, 0.84f, 0.20f, 1f), true);
+        RectTransform recRt = gameOverRecordText.GetComponent<RectTransform>();
+        recRt.anchorMin = new Vector2(0.5f, 1f);
+        recRt.anchorMax = new Vector2(0.5f, 1f);
+        recRt.anchoredPosition = new Vector2(0, -126);
+        recRt.sizeDelta = new Vector2(560, 42);
+        recObj.SetActive(false);
+
+        // Inner Stats Card Container (clean padding & balanced line spacing)
+        GameObject statsCardObj = new GameObject("GameOverStatsCard");
+        statsCardObj.transform.SetParent(modalObj.transform, false);
+        Image statsCardImg = statsCardObj.AddComponent<Image>();
+        UIStyle.StyleCard(statsCardImg, new Color(0.04f, 0.06f, 0.11f, 0.92f), false);
+        RectTransform cardRt = statsCardObj.GetComponent<RectTransform>();
+        cardRt.anchorMin = new Vector2(0.5f, 1f);
+        cardRt.anchorMax = new Vector2(0.5f, 1f);
+        cardRt.anchoredPosition = new Vector2(0, -242);
+        cardRt.sizeDelta = new Vector2(600, 168);
+
+        GameObject statsTextObj = new GameObject("GameOverStatsText");
+        statsTextObj.transform.SetParent(statsCardObj.transform, false);
+        gameOverStatsText = statsTextObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(gameOverStatsText, 26, new Color(0.94f, 0.96f, 1f, 1f), true);
+        gameOverStatsText.lineSpacing = 1.15f;
+        RectTransform stRt = gameOverStatsText.GetComponent<RectTransform>();
+        stRt.anchorMin = Vector2.zero;
+        stRt.anchorMax = Vector2.one;
+        stRt.offsetMin = new Vector2(20, 12);
+        stRt.offsetMax = new Vector2(-20, -12);
+
+        // Try Again Button (Sleek Rounded Pill)
         GameObject btnObj = new GameObject("TryAgainButton");
-        btnObj.transform.SetParent(gameOverPanel.transform, false);
+        btnObj.transform.SetParent(modalObj.transform, false);
         Image btnImg = btnObj.AddComponent<Image>();
-        btnImg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
         tryAgainButton = btnObj.AddComponent<Button>();
+        UIStyle.StyleButton(tryAgainButton, btnImg, new Color(0.11f, 0.72f, 0.36f, 1f), true);
         tryAgainButton.onClick.AddListener(() => {
-            Time.timeScale = 1f; // Reset time scale!
+            Time.timeScale = 1f;
             UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
         });
         RectTransform brt = btnObj.GetComponent<RectTransform>();
-        brt.anchorMin = new Vector2(0.5f, 0.5f);
-        brt.anchorMax = new Vector2(0.5f, 0.5f);
-        brt.anchoredPosition = new Vector2(0, -100);
-        brt.sizeDelta = new Vector2(400, 100);
+        brt.anchorMin = new Vector2(0.5f, 0f);
+        brt.anchorMax = new Vector2(0.5f, 0f);
+        brt.anchoredPosition = new Vector2(0, 152);
+        brt.sizeDelta = new Vector2(390, 68);
         
         GameObject btnTextObj = new GameObject("Text");
         btnTextObj.transform.SetParent(btnObj.transform, false);
         Text btnText = btnTextObj.AddComponent<Text>();
-        ArabicUI.Apply(btnText, true);
-        btnText.fontSize = 46;
-        btnText.color = Color.white;
+        UIStyle.ConfigureArabicText(btnText, 32, Color.white, true);
         btnText.text = ArabicStrings.TryAgain;
-        btnText.alignment = TextAnchor.MiddleCenter;
         RectTransform btrt = btnText.GetComponent<RectTransform>();
         btrt.anchorMin = Vector2.zero;
         btrt.anchorMax = Vector2.one;
         btrt.offsetMin = Vector2.zero;
         btrt.offsetMax = Vector2.zero;
 
-        // Share Result Button (Application.Quit does nothing in WebGL)
+        // Share Result Button (Sleek Rounded Pill)
         GameObject shareObj = new GameObject("ShareButton");
-        shareObj.transform.SetParent(gameOverPanel.transform, false);
+        shareObj.transform.SetParent(modalObj.transform, false);
         Image shareImg = shareObj.AddComponent<Image>();
-        shareImg.color = new Color(0.16f, 0.55f, 0.85f, 1f);
         shareButton = shareObj.AddComponent<Button>();
+        UIStyle.StyleButton(shareButton, shareImg, new Color(0.14f, 0.54f, 0.88f, 1f), true);
         shareButton.onClick.AddListener(ShareResult);
         RectTransform srt = shareObj.GetComponent<RectTransform>();
-        srt.anchorMin = new Vector2(0.5f, 0.5f);
-        srt.anchorMax = new Vector2(0.5f, 0.5f);
-        srt.anchoredPosition = new Vector2(0, -220);
-        srt.sizeDelta = new Vector2(400, 100);
+        srt.anchorMin = new Vector2(0.5f, 0f);
+        srt.anchorMax = new Vector2(0.5f, 0f);
+        srt.anchoredPosition = new Vector2(0, 72);
+        srt.sizeDelta = new Vector2(390, 60);
 
         GameObject shareTextObj = new GameObject("Text");
         shareTextObj.transform.SetParent(shareObj.transform, false);
         Text shareText = shareTextObj.AddComponent<Text>();
-        ArabicUI.Apply(shareText, true);
-        shareText.fontSize = 46;
-        shareText.color = Color.white;
+        UIStyle.ConfigureArabicText(shareText, 28, Color.white, true);
         shareText.text = ArabicStrings.Share;
-        shareText.alignment = TextAnchor.MiddleCenter;
         RectTransform strt = shareText.GetComponent<RectTransform>();
         strt.anchorMin = Vector2.zero;
         strt.anchorMax = Vector2.one;
         strt.offsetMin = Vector2.zero;
         strt.offsetMax = Vector2.zero;
+
+        // Share Copied Feedback
+        GameObject sfObj = new GameObject("ShareFeedbackText");
+        sfObj.transform.SetParent(modalObj.transform, false);
+        shareFeedbackText = sfObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(shareFeedbackText, 22, new Color(0.35f, 0.96f, 0.55f, 0f), true);
+        shareFeedbackText.text = ArabicStrings.ShareCopied;
+        shareFeedbackText.raycastTarget = false;
+        RectTransform sfrt = shareFeedbackText.GetComponent<RectTransform>();
+        sfrt.anchorMin = new Vector2(0.5f, 0f);
+        sfrt.anchorMax = new Vector2(0.5f, 0f);
+        sfrt.anchoredPosition = new Vector2(0, 22);
+        sfrt.sizeDelta = new Vector2(460, 36);
     }
 
     private float checkTimer = 1f;
 
     void Update()
     {
+        if (topHudPanel != null)
+        {
+            bool shouldShowHud = !isGameOver && !UIManager.IsStartOverlayActive;
+            if (topHudPanel.activeSelf != shouldShowHud) topHudPanel.SetActive(shouldShowHud);
+        }
+
         if (waveText != null && !isGameOver)
         {
             waveText.text = ArabicUI.Format(ArabicStrings.HudTemplate, currentLevel, totalEnemies, totalKills, score);
@@ -334,18 +417,24 @@ public class GameManager : MonoBehaviour
         {
             if (!gameOverPanel.activeSelf)
             {
+                PopulateGameOverUI(IsNewRecord());
                 gameOverPanel.SetActive(true);
-                waveText.gameObject.SetActive(false);
-                announcementText.gameObject.SetActive(false);
-                
-                gameOverText.text = BuildGameOverText();
-                gameOverText.color = new Color(1f, 0.35f, 0.25f);
+                if (waveText != null) waveText.gameObject.SetActive(false);
+                if (announcementText != null) announcementText.gameObject.SetActive(false);
             }
             
             // Fade in the game over panel smoothly (use unscaledDeltaTime because timeScale is 0)
             if (gameOverCanvasGroup.alpha < 1f)
             {
                 gameOverCanvasGroup.alpha += Time.unscaledDeltaTime * 2f;
+            }
+
+            if (shareFeedbackTimer > 0f && shareFeedbackText != null)
+            {
+                shareFeedbackTimer -= Time.unscaledDeltaTime;
+                Color c = shareFeedbackText.color;
+                c.a = Mathf.Clamp01(shareFeedbackTimer / 0.8f);
+                shareFeedbackText.color = c;
             }
         }
     }
@@ -388,6 +477,8 @@ public class GameManager : MonoBehaviour
         // Announce completion + the reward earned for clearing this level.
         string rewardMessage = GrantLevelCompleteReward(currentLevel);
         ShowAnnouncement(ArabicUI.Format(ArabicStrings.AnnounceLevelComplete, currentLevel) + "\n" + rewardMessage, 3.5f);
+        GameAudio.PlayWaveComplete();
+        if (UIManager.instance != null) UIManager.instance.FlashWaveBanner(new Color(0.2f, 0.9f, 0.4f, 0.16f));
 
         // Persist progress: a reload always resumes at the level after this one.
         LevelDirector.SaveClearedLevel(currentLevel);
@@ -408,6 +499,8 @@ public class GameManager : MonoBehaviour
             ? ArabicUI.Format(ArabicStrings.LevelStartStyled, currentLevel, nextPlan.StyleName)
             : ArabicUI.Format(ArabicStrings.AnnounceNextLevel, currentLevel);
         ShowAnnouncement(nextMessage, 2f);
+        GameAudio.PlayWaveStart();
+        if (UIManager.instance != null) UIManager.instance.FlashWaveBanner(new Color(1f, 0.72f, 0.15f, 0.14f));
         yield return new WaitForSeconds(2.5f);
         
         // Start spawning
@@ -741,6 +834,41 @@ public class GameManager : MonoBehaviour
         return ArabicUI.Format(ArabicStrings.RewardLevelComplete, completedLevel, bonus);
     }
 
+    public void RegisterShotFired()
+    {
+        if (isGameOver) return;
+        shotsFired++;
+    }
+
+    public void RegisterShotHit()
+    {
+        if (isGameOver) return;
+        shotsHit++;
+        consecutiveHits++;
+        score += 10; // Immediate hit score feedback so the counter climbs during combat
+
+        // Mini-challenge: 5 consecutive hits without missing grants a Sharpshooter bonus!
+        if (consecutiveHits > 0 && consecutiveHits % 5 == 0)
+        {
+            const int streakBonus = 250;
+            score += streakBonus;
+            string msg = ArabicUI.Format(ArabicStrings.StreakSharpshooter, streakBonus);
+            ShowAnnouncement(msg, 2.0f);
+            if (UIManager.instance != null) UIManager.instance.ShowBuff(msg, 2.2f);
+        }
+    }
+
+    public void RegisterShotMiss()
+    {
+        consecutiveHits = 0;
+    }
+
+    public int GetAccuracyPercent()
+    {
+        if (shotsFired <= 0) return 0;
+        return Mathf.Clamp(Mathf.RoundToInt((float)shotsHit / shotsFired * 100f), 0, 100);
+    }
+
     bool IsNewRecord()
     {
         return totalKills > bestKills || score > bestScore;
@@ -761,26 +889,54 @@ public class GameManager : MonoBehaviour
         PlayerPrefs.Save();
     }
 
-    string BuildGameOverText()
+    void PopulateGameOverUI(bool newRecord)
     {
-        string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
-        string record = IsNewRecord() ? "\n" + ArabicStrings.NewRecord : "";
-        string progress = "\n" + ArabicUI.Format(ArabicStrings.LastCleared, LevelDirector.LastClearedLevel);
-        return ArabicStrings.GameOverTitle + "\n" + stats + record + progress;
+        if (gameOverText != null)
+        {
+            gameOverText.text = ArabicStrings.GameOverTitle;
+            gameOverText.color = new Color(1f, 0.35f, 0.25f);
+        }
+
+        if (gameOverRecordText != null)
+        {
+            gameOverRecordText.text = ArabicStrings.NewRecord;
+            gameOverRecordText.gameObject.SetActive(newRecord);
+        }
+
+        if (gameOverStatsText != null)
+        {
+            int topScore = Mathf.Max(bestScore, score);
+            int topKills = Mathf.Max(bestKills, totalKills);
+            int accuracy = GetAccuracyPercent();
+            string line1 = ArabicUI.Format(ArabicStrings.GameOverScoreLine, score, topScore);
+            string line2 = ArabicUI.Format(ArabicStrings.GameOverKillsLine, totalKills, topKills);
+            string line3 = ArabicUI.Format(ArabicStrings.GameOverAccuracyLine, accuracy, currentLevel);
+            gameOverStatsText.text = line1 + "\n" + line2 + "\n" + line3;
+        }
     }
 
     void ShareResult()
     {
-        string stats = ArabicUI.Format(ArabicStrings.GameOverStats, totalKills, Mathf.Max(bestKills, totalKills));
-        string message = "MYBUPGI - " + stats + " #MyBUPGI\n" +
-                         ArabicUI.Format(ArabicStrings.LastCleared, LevelDirector.LastClearedLevel);
-        if (GameFeatures.instance != null)
-        {
-            string achievements = GameFeatures.instance.GetAchievementSummary();
-            if (!string.IsNullOrEmpty(achievements))
-                message += "\n" + ArabicUI.Format(ArabicStrings.ShareAchievements, achievements);
-        }
+        int topScore = Mathf.Max(bestScore, score);
+        int accuracy = GetAccuracyPercent();
+
+        // Logical-order Arabic for external apps (WhatsApp / clipboard) so it reads naturally.
+        string message =
+            "🎯 حققت " + score + " نقطة في لعبة MyBUPGI!\n" +
+            "🏆 أعلى نتيجة: " + topScore + " | 💀 القتلى: " + totalKills + "\n" +
+            "🎯 الدقة: " + accuracy + "% | 🌊 المستوى: " + currentLevel + "\n" +
+            "هل تستطيع كسر رقمي؟ العب الآن:\n" + GameUrl + " #MyBUPGI";
+
         try { GUIUtility.systemCopyBuffer = message; } catch (System.Exception) { }
+
+        if (shareFeedbackText != null)
+        {
+            Color c = shareFeedbackText.color;
+            c.a = 1f;
+            shareFeedbackText.color = c;
+            shareFeedbackTimer = 2.5f;
+        }
+
         Application.OpenURL("https://wa.me/?text=" + System.Uri.EscapeDataString(message));
     }
 
@@ -792,8 +948,11 @@ public class GameManager : MonoBehaviour
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
 
+        bool hadNewRecord = IsNewRecord();
+
         if (gameOverPanel != null)
         {
+            PopulateGameOverUI(hadNewRecord);
             gameOverPanel.SetActive(true);
             if (gameOverCanvasGroup != null)
             {
@@ -803,11 +962,6 @@ public class GameManager : MonoBehaviour
             }
             if (waveText != null) waveText.gameObject.SetActive(false);
             if (announcementText != null) announcementText.gameObject.SetActive(false);
-            if (gameOverText != null)
-            {
-                gameOverText.text = BuildGameOverText();
-                gameOverText.color = new Color(1f, 0.35f, 0.25f);
-            }
         }
 
         SaveRecords();

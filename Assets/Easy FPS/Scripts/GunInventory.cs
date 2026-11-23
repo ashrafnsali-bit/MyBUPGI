@@ -146,7 +146,7 @@ public class GunInventory : MonoBehaviour {
 
 				currentHAndsAnimator.SetBool("changingWeapon", true);
 
-				yield return new WaitForSeconds(0.8f);//0.8 time to change waepon, but since there is no change weapon animation there is no need to wait fo weapon taken down
+				yield return new WaitForSeconds(0.35f);
 				Destroy(currentGun);
 
 				GameObject resource = (GameObject) Resources.Load(gunsIHave[_redniBroj].ToString());
@@ -192,6 +192,8 @@ public class GunInventory : MonoBehaviour {
 	 * From here I am listing thourhg guns I have and drawing corresponding images on the sceen.
 	 */
 	void OnGUI(){
+		if (UIManager.IsStartOverlayActive) return;
+		if (GameManager.instance != null && GameManager.instance.isGameOver) return;
 		if(currentGun && icons != null && icons.Length == gunsIHave.Count){
 			for(int i = 0; i < gunsIHave.Count; i++){
 				DrawCorrespondingImage(i);
@@ -210,41 +212,49 @@ public class GunInventory : MonoBehaviour {
 	public Vector2 size;
 	/*
 	 * Passing the image number and gun list have the same sort,
-	 * so it will fitthe gun image to our current gun or guns we have.
-	 * The curent gun selected image has their image slightly enlared for some value.
+	 * so it will fit the gun image to our current gun or guns we have.
+	 * The current gun selected image has a bright gold highlight and slot number.
 	 */
 	void DrawCorrespondingImage(int _number){
 		if (_number >= icons.Length || icons[_number] == null) return;
 
 		string deleteCloneFromName = currentGun.name.Replace("(Clone)", "");
+		bool isActive = (deleteCloneFromName == gunsIHave[_number]);
 
-		if(menuStyle == MenuStyle.horizontal){
-			if(deleteCloneFromName == gunsIHave[_number]){
-				GUI.DrawTexture(new Rect(vec2(beginPosition).x +(_number*position_x(spacing)),vec2(beginPosition).y,//position variables
-					vec2(size).x, vec2(size).y),//size
-					icons[_number]);
-			}
-			else{			
-				GUI.DrawTexture(new Rect(vec2(beginPosition).x +(_number*position_x(spacing) + 10),vec2(beginPosition).y + 10,//position variables
-					vec2(size).x - 20, vec2(size).y- 20),//size
-					icons[_number]);
-			}
+		// Responsive compact slot sizing that stays clear of screen edges on narrow viewports
+		float slotW = Mathf.Clamp(Screen.width * 0.095f, 64f, 118f);
+		float slotH = Mathf.Clamp(slotW * 0.56f, 38f, 68f);
+		float gap = 10f;
+		float totalW = gunsIHave.Count * slotW + (gunsIHave.Count - 1) * gap;
+		float startX = Mathf.Max(14f, (Screen.width - totalW) * 0.5f);
+		float startY = Screen.height - slotH - 18f;
+
+		Rect slotRect = new Rect(startX + _number * (slotW + gap), startY, slotW, slotH);
+
+		Color prevColor = GUI.color;
+
+		// Slot background pill
+		GUI.color = isActive ? new Color(0.08f, 0.12f, 0.18f, 0.90f) : new Color(0.05f, 0.06f, 0.08f, 0.62f);
+		GUI.DrawTexture(slotRect, Texture2D.whiteTexture);
+
+		// Active gold top border
+		if (isActive)
+		{
+			GUI.color = new Color(1f, 0.78f, 0.15f, 1f);
+			GUI.DrawTexture(new Rect(slotRect.x, slotRect.y, slotRect.width, 3f), Texture2D.whiteTexture);
+			GUI.DrawTexture(new Rect(slotRect.x, slotRect.yMax - 2f, slotRect.width, 2f), Texture2D.whiteTexture);
 		}
-		else if(menuStyle == MenuStyle.vertical){
-			if(deleteCloneFromName == gunsIHave[_number]){
-				GUI.DrawTexture(new Rect(vec2(beginPosition).x,vec2(beginPosition).y +(_number*position_y(spacing)),//position variables
-					vec2(size).x, vec2(size).y),//size
-					icons[_number]);
-			}
-			else{			
-				GUI.DrawTexture(new Rect(vec2(beginPosition).x,vec2(beginPosition).y + 10  +(_number*position_y(spacing)),//position variables
-					vec2(size).x - 20, vec2(size).y- 20),//size
-					icons[_number]);
-			}
-		}
 
+		// Weapon icon
+		float pad = isActive ? 6f : 10f;
+		GUI.color = isActive ? Color.white : new Color(0.8f, 0.8f, 0.8f, 0.55f);
+		GUI.DrawTexture(new Rect(slotRect.x + pad, slotRect.y + pad, slotRect.width - pad * 2f, slotRect.height - pad * 2f), icons[_number], ScaleMode.ScaleToFit);
 
+		// Slot key badge ([1], [2])
+		GUI.color = isActive ? new Color(1f, 0.85f, 0.25f, 1f) : new Color(0.8f, 0.85f, 0.9f, 0.65f);
+		GUI.Label(new Rect(slotRect.x + 5f, slotRect.y + 3f, 24f, 20f), $"<b>{_number + 1}</b>");
 
+		GUI.color = prevColor;
 	}
 
 	/*

@@ -15,14 +15,20 @@ public class UIManager : MonoBehaviour
     public static bool MobileGrenadePressed = false;
 
     private Canvas canvas;
+    private GameObject hudRoot;
     private Text healthText;
     private Text ammoText;
     private Text grenadesText;
+    private Text reloadPromptText;
     private RectTransform healthBarFill;
     private Image healthBarImage;
     
     // New UI Elements
     private Image damageOverlay;
+    private Image waveFlashOverlay;
+    private float waveFlashTimer = 0f;
+    private Color waveFlashColor = Color.clear;
+    private Image crosshairImage;
     private RectTransform hitMarkerRoot;
     private Image[] hitMarkerLines = new Image[4];
     
@@ -60,6 +66,25 @@ public class UIManager : MonoBehaviour
     private float achievementTimer = 0f;
     private Button dailyGiftButton;
     private Text dailyGiftLabel;
+    private Text dailyGiftPreviewText;
+
+    // Arabic Abilities & Shield HUD Panel
+    private GameObject abilitiesPanel;
+    private Text shieldText;
+    private RectTransform shieldBarFill;
+    private Text dashStatusText;
+    private Text slowMoStatusText;
+    private Text sonarStatusText;
+
+    // Mystery Gift Beacon HUD
+    private GameObject giftBeaconObj;
+    private Text giftBeaconText;
+    private float giftBeaconTimeout = 0f;
+
+    public static bool IsStartOverlayActive
+    {
+        get { return instance != null && instance.startOverlay != null && instance.startOverlay.activeSelf; }
+    }
 
     void Awake()
     {
@@ -107,13 +132,22 @@ public class UIManager : MonoBehaviour
 
         canvasObj.AddComponent<GraphicRaycaster>();
 
-        // 1.2 Start overlay + hype UI
-        SetupStartOverlay(canvasObj.transform);
-        SetupHypeUI(canvasObj.transform);
+        // Gameplay HUD root (hidden cleanly during Start Screen and Game Over)
+        hudRoot = new GameObject("GameplayHUDRoot");
+        hudRoot.transform.SetParent(canvasObj.transform, false);
+        RectTransform hudRt = hudRoot.AddComponent<RectTransform>();
+        hudRt.anchorMin = Vector2.zero;
+        hudRt.anchorMax = Vector2.one;
+        hudRt.offsetMin = Vector2.zero;
+        hudRt.offsetMax = Vector2.zero;
+        hudRoot.SetActive(false);
+
+        // 1.2 Hype UI (lives under hudRoot)
+        SetupHypeUI(hudRoot.transform);
 
         // 1.5 Damage Vignette
         GameObject vignetteObj = new GameObject("DamageVignette");
-        vignetteObj.transform.SetParent(canvasObj.transform, false);
+        vignetteObj.transform.SetParent(hudRoot.transform, false);
         RectTransform vRt = vignetteObj.AddComponent<RectTransform>();
         vRt.anchorMin = Vector2.zero;
         vRt.anchorMax = Vector2.one;
@@ -122,16 +156,28 @@ public class UIManager : MonoBehaviour
         damageOverlay.color = new Color(1, 0, 0, 0); // Transparent red
         damageOverlay.raycastTarget = false;
 
+        // 1.55 Wave Transition Flash Overlay
+        GameObject waveFlashObj = new GameObject("WaveFlashOverlay");
+        waveFlashObj.transform.SetParent(hudRoot.transform, false);
+        RectTransform wfRt = waveFlashObj.AddComponent<RectTransform>();
+        wfRt.anchorMin = Vector2.zero;
+        wfRt.anchorMax = Vector2.one;
+        wfRt.sizeDelta = Vector2.zero;
+        waveFlashOverlay = waveFlashObj.AddComponent<Image>();
+        waveFlashOverlay.color = Color.clear;
+        waveFlashOverlay.raycastTarget = false;
+
         // 1.6 Mobile Touch Controls (Only active on Mobile)
 #if UNITY_ANDROID || UNITY_IOS
-        SetupMobileControls(canvasObj.transform);
+        SetupMobileControls(hudRoot.transform);
 #endif
 
         // 3. Crosshair (Center Dot)
         GameObject crosshairObj = new GameObject("Crosshair");
-        crosshairObj.transform.SetParent(canvasObj.transform, false);
-        Image crosshairImg = crosshairObj.AddComponent<Image>();
-        crosshairImg.color = new Color(1, 1, 1, 0.8f);
+        crosshairObj.transform.SetParent(hudRoot.transform, false);
+        crosshairImage = crosshairObj.AddComponent<Image>();
+        crosshairImage.color = new Color(1, 1, 1, 0.85f);
+        crosshairImage.raycastTarget = false;
         RectTransform crt = crosshairObj.GetComponent<RectTransform>();
         crt.anchorMin = new Vector2(0.5f, 0.5f);
         crt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -142,7 +188,7 @@ public class UIManager : MonoBehaviour
 
         // 4. Modern Hit Marker
         GameObject hitRootObj = new GameObject("HitMarkerRoot");
-        hitRootObj.transform.SetParent(canvasObj.transform, false);
+        hitRootObj.transform.SetParent(hudRoot.transform, false);
         hitMarkerRoot = hitRootObj.AddComponent<RectTransform>();
         hitMarkerRoot.anchorMin = new Vector2(0.5f, 0.5f);
         hitMarkerRoot.anchorMax = new Vector2(0.5f, 0.5f);
@@ -162,9 +208,22 @@ public class UIManager : MonoBehaviour
             hitMarkerLines[i] = lineImg;
         }
 
+        // 4.2 Low-Ammo / Reload Prompt (below crosshair so player never gets surprised)
+        GameObject reloadObj = new GameObject("ReloadPromptText");
+        reloadObj.transform.SetParent(hudRoot.transform, false);
+        reloadPromptText = reloadObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(reloadPromptText, 26, new Color(1f, 0.80f, 0.2f, 1f), true);
+        reloadPromptText.raycastTarget = false;
+        RectTransform rprt = reloadPromptText.rectTransform;
+        rprt.anchorMin = new Vector2(0.5f, 0.5f);
+        rprt.anchorMax = new Vector2(0.5f, 0.5f);
+        rprt.anchoredPosition = new Vector2(0, -72);
+        rprt.sizeDelta = new Vector2(420, 48);
+        reloadObj.SetActive(false);
+
         // 4.5 Directional Damage Indicator
         GameObject dDirRootObj = new GameObject("DamageDirectionRoot");
-        dDirRootObj.transform.SetParent(canvasObj.transform, false);
+        dDirRootObj.transform.SetParent(hudRoot.transform, false);
         damageDirRoot = dDirRootObj.AddComponent<RectTransform>();
         damageDirRoot.anchorMin = new Vector2(0.5f, 0.5f);
         damageDirRoot.anchorMax = new Vector2(0.5f, 0.5f);
@@ -181,53 +240,45 @@ public class UIManager : MonoBehaviour
         ddRt.anchoredPosition = new Vector2(0, 100); // Push out from center
         ddRt.sizeDelta = new Vector2(120, 25);
 
-        // 5. Health UI
-        // Background
+        // 5. Health UI (Rounded dark-glass card)
         GameObject hpBgObj = new GameObject("HealthPanelBG");
-        hpBgObj.transform.SetParent(canvasObj.transform, false);
+        hpBgObj.transform.SetParent(hudRoot.transform, false);
         Image hpBgImg = hpBgObj.AddComponent<Image>();
-        hpBgImg.color = new Color(0, 0, 0, 0.6f);
+        UIStyle.StyleCard(hpBgImg, new Color(0.05f, 0.08f, 0.13f, 0.84f));
         RectTransform hBgRt = hpBgObj.GetComponent<RectTransform>();
         hBgRt.anchorMin = new Vector2(0, 0);
         hBgRt.anchorMax = new Vector2(0, 0);
         hBgRt.pivot = new Vector2(0, 0);
-        hBgRt.anchoredPosition = new Vector2(50, 50);
-        hBgRt.sizeDelta = new Vector2(350, 100);
+        hBgRt.anchoredPosition = new Vector2(36, 36);
+        hBgRt.sizeDelta = new Vector2(340, 92);
 
-        // Text
         GameObject healthObj = new GameObject("HealthText");
         healthObj.transform.SetParent(hpBgObj.transform, false);
         healthText = healthObj.AddComponent<Text>();
-        ArabicUI.Apply(healthText, true);
-        healthText.fontStyle = FontStyle.Bold;
-        healthText.fontSize = 45;
-        healthText.color = Color.white;
-        healthText.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(healthText, 30, Color.white, true);
         RectTransform hrt = healthText.GetComponent<RectTransform>();
         hrt.anchorMin = Vector2.zero;
         hrt.anchorMax = Vector2.one;
-        hrt.offsetMin = new Vector2(0, 20); // Make room for bar
-        hrt.offsetMax = Vector2.zero;
-        Outline hOutline = healthObj.AddComponent<Outline>();
-        hOutline.effectColor = new Color(0, 0, 0, 0.8f);
+        hrt.offsetMin = new Vector2(12, 22);
+        hrt.offsetMax = new Vector2(-12, -4);
 
         // Health Bar Track
         GameObject trackObj = new GameObject("HealthBarTrack");
         trackObj.transform.SetParent(hpBgObj.transform, false);
         Image trackImg = trackObj.AddComponent<Image>();
-        trackImg.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+        trackImg.color = new Color(0.15f, 0.20f, 0.28f, 1f);
         RectTransform tRt = trackObj.GetComponent<RectTransform>();
         tRt.anchorMin = new Vector2(0, 0);
         tRt.anchorMax = new Vector2(1, 0);
         tRt.pivot = new Vector2(0.5f, 0);
-        tRt.anchoredPosition = new Vector2(0, 10);
-        tRt.sizeDelta = new Vector2(-20, 15); // Padding
+        tRt.anchoredPosition = new Vector2(0, 12);
+        tRt.sizeDelta = new Vector2(-28, 12);
         
-        // Health Bar Trail (Yellow/White that shrinks slower)
+        // Health Bar Trail
         GameObject trailObj = new GameObject("HealthBarTrail");
         trailObj.transform.SetParent(trackObj.transform, false);
         Image trailImg = trailObj.AddComponent<Image>();
-        trailImg.color = new Color(1f, 0.9f, 0.2f, 1f); // Yellow trail
+        trailImg.color = new Color(1f, 0.88f, 0.2f, 1f);
         healthBarTrailFill = trailObj.GetComponent<RectTransform>();
         healthBarTrailFill.anchorMin = new Vector2(0, 0);
         healthBarTrailFill.anchorMax = new Vector2(1, 1);
@@ -239,7 +290,7 @@ public class UIManager : MonoBehaviour
         GameObject fillObj = new GameObject("HealthBarFill");
         fillObj.transform.SetParent(trackObj.transform, false);
         healthBarImage = fillObj.AddComponent<Image>();
-        healthBarImage.color = new Color(0.2f, 0.8f, 0.2f, 1f); // Nice green
+        healthBarImage.color = new Color(0.18f, 0.84f, 0.42f, 1f);
         healthBarFill = fillObj.GetComponent<RectTransform>();
         healthBarFill.anchorMin = new Vector2(0, 0);
         healthBarFill.anchorMax = new Vector2(1, 1);
@@ -247,65 +298,222 @@ public class UIManager : MonoBehaviour
         healthBarFill.offsetMin = Vector2.zero;
         healthBarFill.offsetMax = Vector2.zero;
 
-        // 6. Ammo UI
+        // 6. Ammo UI (Rounded dark-glass card, top-right)
         GameObject ammoBgObj = new GameObject("AmmoPanelBG");
-        ammoBgObj.transform.SetParent(canvasObj.transform, false);
+        ammoBgObj.transform.SetParent(hudRoot.transform, false);
         Image ammoBgImg = ammoBgObj.AddComponent<Image>();
-        ammoBgImg.color = new Color(0, 0, 0, 0.6f);
+        UIStyle.StyleCard(ammoBgImg, new Color(0.05f, 0.08f, 0.13f, 0.84f));
         RectTransform aBgRt = ammoBgObj.GetComponent<RectTransform>();
-        aBgRt.anchorMin = new Vector2(1, 1); // Top Right
+        aBgRt.anchorMin = new Vector2(1, 1);
         aBgRt.anchorMax = new Vector2(1, 1);
         aBgRt.pivot = new Vector2(1, 1);
-        aBgRt.anchoredPosition = new Vector2(-50, -50);
-        aBgRt.sizeDelta = new Vector2(250, 80);
+        aBgRt.anchoredPosition = new Vector2(-28, -22);
+        aBgRt.sizeDelta = new Vector2(220, 72);
 
         GameObject ammoObj = new GameObject("AmmoText");
         ammoObj.transform.SetParent(ammoBgObj.transform, false);
         ammoText = ammoObj.AddComponent<Text>();
-        ArabicUI.Apply(ammoText, true);
-        ammoText.fontStyle = FontStyle.Bold;
-        ammoText.fontSize = 45;
-        ammoText.color = Color.white;
-        ammoText.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(ammoText, 34, Color.white, true);
         RectTransform art = ammoText.GetComponent<RectTransform>();
         art.anchorMin = Vector2.zero;
         art.anchorMax = Vector2.one;
         art.offsetMin = Vector2.zero;
         art.offsetMax = Vector2.zero;
-        Outline aOutline = ammoObj.AddComponent<Outline>();
-        aOutline.effectColor = new Color(0, 0, 0, 0.8f);
 
-        // 7. Grenades UI
+        // 7. Grenades UI (Rounded pill below ammo)
         GameObject grenadeBgObj = new GameObject("GrenadePanelBG");
-        grenadeBgObj.transform.SetParent(canvasObj.transform, false);
+        grenadeBgObj.transform.SetParent(hudRoot.transform, false);
         Image grenadeBgImg = grenadeBgObj.AddComponent<Image>();
-        grenadeBgImg.color = new Color(0, 0, 0, 0.6f);
+        UIStyle.StyleCard(grenadeBgImg, new Color(0.05f, 0.08f, 0.13f, 0.84f));
         RectTransform gBgRt = grenadeBgObj.GetComponent<RectTransform>();
-        gBgRt.anchorMin = new Vector2(1, 1); // Top Right
+        gBgRt.anchorMin = new Vector2(1, 1);
         gBgRt.anchorMax = new Vector2(1, 1);
         gBgRt.pivot = new Vector2(1, 1);
-        gBgRt.anchoredPosition = new Vector2(-50, -140); // Below ammo
-        gBgRt.sizeDelta = new Vector2(150, 60);
+        gBgRt.anchoredPosition = new Vector2(-28, -104);
+        gBgRt.sizeDelta = new Vector2(170, 54);
 
         GameObject grenadeObj = new GameObject("GrenadeText");
         grenadeObj.transform.SetParent(grenadeBgObj.transform, false);
         grenadesText = grenadeObj.AddComponent<Text>();
-        ArabicUI.Apply(grenadesText, true);
-        grenadesText.fontStyle = FontStyle.Bold;
-        grenadesText.fontSize = 35;
-        grenadesText.color = Color.white;
-        grenadesText.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(grenadesText, 24, Color.white, true);
         RectTransform grt = grenadesText.GetComponent<RectTransform>();
         grt.anchorMin = Vector2.zero;
         grt.anchorMax = Vector2.one;
         grt.offsetMin = Vector2.zero;
         grt.offsetMax = Vector2.zero;
-        Outline gOutline = grenadeObj.AddComponent<Outline>();
-        gOutline.effectColor = new Color(0, 0, 0, 0.8f);
 
         UpdateHealth(100);
         UpdateAmmo(30, 90);
         UpdateGrenades(3);
+        SetupAbilitiesPanel(hudRoot.transform);
+        SetupGiftBeaconUI(hudRoot.transform);
+
+        // Start overlay created LAST with dedicated high sortingOrder so it sits above all HUD & GameManager announcements
+        SetupStartOverlay(canvasObj.transform);
+    }
+
+    private void SetupAbilitiesPanel(Transform parent)
+    {
+        abilitiesPanel = new GameObject("AbilitiesPanelBG");
+        abilitiesPanel.transform.SetParent(parent, false);
+        Image bg = abilitiesPanel.AddComponent<Image>();
+        UIStyle.StyleCard(bg, new Color(0.05f, 0.08f, 0.13f, 0.84f));
+        RectTransform rt = abilitiesPanel.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0, 0);
+        rt.anchorMax = new Vector2(0, 0);
+        rt.pivot = new Vector2(0, 0);
+        rt.anchoredPosition = new Vector2(36, 140); // Directly above bottom-left Health bar
+        rt.sizeDelta = new Vector2(340, 174);
+
+        GameObject topAccent = new GameObject("Accent");
+        topAccent.transform.SetParent(abilitiesPanel.transform, false);
+        Image accImg = topAccent.AddComponent<Image>();
+        accImg.color = new Color(0f, 0.82f, 1f, 0.9f);
+        RectTransform accRt = topAccent.GetComponent<RectTransform>();
+        accRt.anchorMin = new Vector2(0.04f, 1);
+        accRt.anchorMax = new Vector2(0.96f, 1);
+        accRt.pivot = new Vector2(0.5f, 1);
+        accRt.offsetMin = new Vector2(0, -3);
+        accRt.offsetMax = Vector2.zero;
+
+        shieldText = CreateAbilityRow(abilitiesPanel.transform, "ShieldText", -22, 20, Color.white);
+        shieldText.text = ArabicUI.Format(ArabicStrings.ShieldTemplate, 250, 250);
+
+        GameObject sTrack = new GameObject("ShieldTrack");
+        sTrack.transform.SetParent(abilitiesPanel.transform, false);
+        Image stImg = sTrack.AddComponent<Image>();
+        stImg.color = new Color(0.14f, 0.20f, 0.30f, 1f);
+        RectTransform stRt = sTrack.GetComponent<RectTransform>();
+        stRt.anchorMin = new Vector2(0, 1);
+        stRt.anchorMax = new Vector2(1, 1);
+        stRt.pivot = new Vector2(0.5f, 1);
+        stRt.anchoredPosition = new Vector2(0, -44);
+        stRt.sizeDelta = new Vector2(-28, 10);
+
+        GameObject sFill = new GameObject("ShieldFill");
+        sFill.transform.SetParent(sTrack.transform, false);
+        Image sfImg = sFill.AddComponent<Image>();
+        sfImg.color = new Color(0f, 0.84f, 1f, 1f);
+        shieldBarFill = sFill.GetComponent<RectTransform>();
+        shieldBarFill.anchorMin = Vector2.zero;
+        shieldBarFill.anchorMax = Vector2.one;
+        shieldBarFill.offsetMin = Vector2.zero;
+        shieldBarFill.offsetMax = Vector2.zero;
+
+        dashStatusText = CreateAbilityRow(abilitiesPanel.transform, "DashText", -72, 19, new Color(0.25f, 1f, 0.55f));
+        slowMoStatusText = CreateAbilityRow(abilitiesPanel.transform, "SlowMoText", -100, 19, new Color(0.25f, 1f, 0.55f));
+        sonarStatusText = CreateAbilityRow(abilitiesPanel.transform, "SonarText", -128, 19, new Color(0.25f, 1f, 0.55f));
+        Text djText = CreateAbilityRow(abilitiesPanel.transform, "DoubleJumpText", -154, 16, new Color(0.75f, 0.83f, 0.94f));
+        djText.text = ArabicStrings.AbilityDoubleJump;
+    }
+
+    private Text CreateAbilityRow(Transform parent, string name, float yOffset, int fontSize, Color color)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        Text txt = obj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(txt, fontSize, color, true, TextAnchor.MiddleRight);
+        txt.raycastTarget = false;
+        RectTransform rt = txt.rectTransform;
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(1, 1);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(0, yOffset);
+        rt.sizeDelta = new Vector2(-28, 28);
+        return txt;
+    }
+
+    private void SetupGiftBeaconUI(Transform parent)
+    {
+        giftBeaconObj = new GameObject("GiftBeaconBanner");
+        giftBeaconObj.transform.SetParent(parent, false);
+        Image bg = giftBeaconObj.AddComponent<Image>();
+        UIStyle.StyleCard(bg, new Color(0.14f, 0.10f, 0.02f, 0.90f));
+        RectTransform rt = giftBeaconObj.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 1f);
+        rt.anchorMax = new Vector2(0.5f, 1f);
+        rt.pivot = new Vector2(0.5f, 1f);
+        rt.anchoredPosition = new Vector2(0, -108);
+        rt.sizeDelta = new Vector2(390, 48);
+
+        GameObject txtObj = new GameObject("GiftBeaconText");
+        txtObj.transform.SetParent(giftBeaconObj.transform, false);
+        giftBeaconText = txtObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(giftBeaconText, 22, new Color(1f, 0.86f, 0.25f, 1f), true);
+        giftBeaconText.raycastTarget = false;
+        RectTransform trt = giftBeaconText.rectTransform;
+        trt.anchorMin = Vector2.zero;
+        trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(12, 2);
+        trt.offsetMax = new Vector2(-12, -2);
+
+        giftBeaconObj.SetActive(false);
+    }
+
+    public void UpdateAbilitiesHUD(float shield, float maxShield, float dashCd, float slowMoCd, bool slowMoActive, float sonarCd)
+    {
+        if (abilitiesPanel == null) return;
+        bool visible = !IsStartOverlayActive && (GameManager.instance == null || !GameManager.instance.isGameOver);
+        if (abilitiesPanel.activeSelf != visible) abilitiesPanel.SetActive(visible);
+        if (!visible) return;
+
+        if (shieldText != null)
+            shieldText.text = ArabicUI.Format(ArabicStrings.ShieldTemplate, Mathf.CeilToInt(shield), Mathf.CeilToInt(maxShield));
+        if (shieldBarFill != null)
+            shieldBarFill.anchorMax = new Vector2(Mathf.Clamp01(maxShield > 0f ? shield / maxShield : 0f), 1f);
+
+        Color readyCol = new Color(0.25f, 1f, 0.55f, 1f);
+        Color cdCol = new Color(1f, 0.72f, 0.2f, 1f);
+        Color activeCol = new Color(0.2f, 0.9f, 1f, 1f);
+
+        if (dashStatusText != null)
+        {
+            dashStatusText.text = dashCd <= 0f ? ArabicStrings.AbilityDashReady : ArabicUI.Format(ArabicStrings.AbilityDashCd, dashCd.ToString("F1"));
+            dashStatusText.color = dashCd <= 0f ? readyCol : cdCol;
+        }
+        if (slowMoStatusText != null)
+        {
+            if (slowMoActive) { slowMoStatusText.text = ArabicStrings.AbilitySlowMoActive; slowMoStatusText.color = activeCol; }
+            else if (slowMoCd <= 0f) { slowMoStatusText.text = ArabicStrings.AbilitySlowMoReady; slowMoStatusText.color = readyCol; }
+            else { slowMoStatusText.text = ArabicUI.Format(ArabicStrings.AbilitySlowMoCd, slowMoCd.ToString("F1")); slowMoStatusText.color = cdCol; }
+        }
+        if (sonarStatusText != null)
+        {
+            sonarStatusText.text = sonarCd <= 0f ? ArabicStrings.AbilitySonarReady : ArabicUI.Format(ArabicStrings.AbilitySonarCd, sonarCd.ToString("F1"));
+            sonarStatusText.color = sonarCd <= 0f ? readyCol : cdCol;
+        }
+    }
+
+    public void UpdateGiftBeacon(Vector3 giftWorldPos, float remainingSeconds = -1f)
+    {
+        if (giftBeaconObj == null || giftBeaconText == null) return;
+        if (IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver))
+        {
+            giftBeaconObj.SetActive(false);
+            return;
+        }
+
+        Transform cam = Camera.main != null ? Camera.main.transform : null;
+        if (cam == null) return;
+
+        Vector3 toGift = giftWorldPos - cam.position;
+        int meters = Mathf.Max(1, Mathf.RoundToInt(toGift.magnitude));
+        toGift.y = 0f;
+        Vector3 fwd = cam.forward;
+        fwd.y = 0f;
+        float angle = Vector3.SignedAngle(fwd.normalized, toGift.normalized, Vector3.up);
+        string dirArrow = Mathf.Abs(angle) <= 30f ? "▲" : (angle > 30f && angle < 150f ? "▶" : (angle < -30f && angle > -150f ? "◀" : "▼"));
+
+        string timerSuffix = remainingSeconds >= 0f ? "  (" + Mathf.CeilToInt(remainingSeconds) + "s)" : "";
+        giftBeaconObj.SetActive(true);
+        giftBeaconText.text = dirArrow + "  " + ArabicUI.Format(ArabicStrings.GiftBeaconLabel, meters) + timerSuffix;
+        giftBeaconTimeout = 0.25f;
+    }
+
+    public void ClearGiftBeacon()
+    {
+        if (giftBeaconObj != null) giftBeaconObj.SetActive(false);
+        giftBeaconTimeout = 0f;
     }
 
     public void UpdateHealth(int health, int maxHealth = 100)
@@ -327,7 +535,38 @@ public class UIManager : MonoBehaviour
         {
             ammoText.text = current.ToString() + " / " + max.ToString();
             if (current == 0) ammoText.color = Color.red;
+            else if (current <= 3) ammoText.color = new Color(1f, 0.78f, 0.15f, 1f);
             else ammoText.color = Color.white;
+        }
+    }
+
+    public void UpdateReloadPrompt(int currentInMag, int reserveAmmo, bool isReloading)
+    {
+        if (reloadPromptText == null) return;
+        if (IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver))
+        {
+            if (reloadPromptText.gameObject.activeSelf) reloadPromptText.gameObject.SetActive(false);
+            return;
+        }
+
+        if (isReloading)
+        {
+            reloadPromptText.gameObject.SetActive(true);
+            reloadPromptText.text = ArabicStrings.ReloadingNow;
+            reloadPromptText.color = new Color(0.4f, 0.92f, 1f, 1f);
+        }
+        else if (reserveAmmo > 0 && currentInMag <= 3)
+        {
+            reloadPromptText.gameObject.SetActive(true);
+            reloadPromptText.text = ArabicStrings.ReloadPrompt;
+            float pulse = 0.65f + 0.35f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 6f));
+            reloadPromptText.color = currentInMag == 0
+                ? new Color(1f, 0.35f, 0.2f, pulse)
+                : new Color(1f, 0.82f, 0.2f, pulse);
+        }
+        else if (reloadPromptText.gameObject.activeSelf)
+        {
+            reloadPromptText.gameObject.SetActive(false);
         }
     }
 
@@ -341,15 +580,35 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    public void ShowHitMarker()
+    public void ShowHitMarker(bool isKill = false)
     {
-        hitMarkerTimer = hitMarkerMaxTime;
-        hitMarkerRoot.localScale = new Vector3(1.5f, 1.5f, 1f); // Pop up size
+        hitMarkerTimer = isKill ? hitMarkerMaxTime * 1.25f : hitMarkerMaxTime;
+        float popScale = isKill ? 1.85f : 1.45f;
+        if (hitMarkerRoot != null) hitMarkerRoot.localScale = new Vector3(popScale, popScale, 1f);
         
+        // Distinct from red damage taken: white for hit, emerald green for confirmed kill.
+        Color markerColor = isKill ? new Color(0.2f, 1f, 0.45f, 1f) : Color.white;
         foreach (var img in hitMarkerLines)
         {
-            if (img != null) img.color = Color.white; // Start white, fade out
+            if (img != null) img.color = markerColor;
         }
+    }
+
+    public void SetAiming(bool isAiming)
+    {
+        if (crosshairImage == null) return;
+        float targetAlpha = isAiming ? 0f : 0.8f;
+        Color c = crosshairImage.color;
+        c.a = Mathf.MoveTowards(c.a, targetAlpha, Time.unscaledDeltaTime * 8f);
+        crosshairImage.color = c;
+    }
+
+    public void FlashWaveBanner(Color tint)
+    {
+        if (waveFlashOverlay == null) return;
+        waveFlashColor = tint;
+        waveFlashOverlay.color = tint;
+        waveFlashTimer = 0.5f;
     }
 
     public void ShowDamageFlash()
@@ -371,6 +630,12 @@ public class UIManager : MonoBehaviour
 
     void Update()
     {
+        if (hudRoot != null)
+        {
+            bool showHud = !IsStartOverlayActive && (GameManager.instance == null || !GameManager.instance.isGameOver);
+            if (hudRoot.activeSelf != showHud) hudRoot.SetActive(showHud);
+        }
+
         // 1. Smoothly update health bar fill
         if (healthBarFill != null)
         {
@@ -507,6 +772,20 @@ public class UIManager : MonoBehaviour
         FadeToast(eventTimerText, ref eventTimerTimer);
         FadeToast(achievementText, ref achievementTimer);
 
+        if (waveFlashTimer > 0f && waveFlashOverlay != null)
+        {
+            waveFlashTimer -= Time.unscaledDeltaTime;
+            Color c = waveFlashColor;
+            c.a = waveFlashColor.a * Mathf.Clamp01(waveFlashTimer / 0.5f);
+            waveFlashOverlay.color = c;
+        }
+
+        if (giftBeaconTimeout > 0f)
+        {
+            giftBeaconTimeout -= Time.unscaledDeltaTime;
+            if (giftBeaconTimeout <= 0f && giftBeaconObj != null) giftBeaconObj.SetActive(false);
+        }
+
         if (dailyGiftButton != null && Time.frameCount % 30 == 0) RefreshDailyGiftButton();
     }
 
@@ -529,124 +808,157 @@ public class UIManager : MonoBehaviour
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
 
+        // Dedicated high-sorting Canvas so StartOverlay sits cleanly above all HUD & GameManager banners
+        Canvas overlayCanvas = startOverlay.AddComponent<Canvas>();
+        overlayCanvas.overrideSorting = true;
+        overlayCanvas.sortingOrder = 30;
+        startOverlay.AddComponent<GraphicRaycaster>();
+
         Image bg = startOverlay.AddComponent<Image>();
-        bg.color = new Color(0.03f, 0.04f, 0.06f, 0.94f);
+        bg.color = new Color(0.03f, 0.05f, 0.09f, 0.88f);
 
+        // Sleek Centered Glass Card
+        GameObject cardObj = new GameObject("StartCenterCard");
+        cardObj.transform.SetParent(startOverlay.transform, false);
+        Image cardImg = cardObj.AddComponent<Image>();
+        UIStyle.StyleCard(cardImg, new Color(0.07f, 0.10f, 0.16f, 0.94f));
+        RectTransform cardRt = cardObj.GetComponent<RectTransform>();
+        cardRt.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRt.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRt.anchoredPosition = new Vector2(0, -6);
+        cardRt.sizeDelta = new Vector2(860, 620);
+
+        // Gold top accent bar inside card
+        GameObject cardAccent = new GameObject("CardAccent");
+        cardAccent.transform.SetParent(cardObj.transform, false);
+        Image caImg = cardAccent.AddComponent<Image>();
+        caImg.color = new Color(1f, 0.78f, 0.18f, 1f);
+        RectTransform caRt = cardAccent.GetComponent<RectTransform>();
+        caRt.anchorMin = new Vector2(0.06f, 1f);
+        caRt.anchorMax = new Vector2(0.94f, 1f);
+        caRt.pivot = new Vector2(0.5f, 1f);
+        caRt.offsetMin = new Vector2(0, -4);
+        caRt.offsetMax = Vector2.zero;
+
+        // Title
         GameObject titleObj = new GameObject("Title");
-        titleObj.transform.SetParent(startOverlay.transform, false);
+        titleObj.transform.SetParent(cardObj.transform, false);
         Text title = titleObj.AddComponent<Text>();
-        title.font = ArabicUI.Get(true);
+        UIStyle.ConfigureArabicText(title, 82, new Color(1f, 0.80f, 0.18f, 1f), true);
         title.text = "MYBUPGI";
-        title.fontSize = 110;
-        title.fontStyle = FontStyle.Bold;
-        title.color = new Color(1f, 0.78f, 0.15f, 1f);
-        title.alignment = TextAnchor.MiddleCenter;
         RectTransform titleRt = title.rectTransform;
-        titleRt.anchorMin = new Vector2(0.5f, 0.5f);
-        titleRt.anchorMax = new Vector2(0.5f, 0.5f);
-        titleRt.anchoredPosition = new Vector2(0, 210);
-        titleRt.sizeDelta = new Vector2(1400, 180);
+        titleRt.anchorMin = new Vector2(0.5f, 1f);
+        titleRt.anchorMax = new Vector2(0.5f, 1f);
+        titleRt.anchoredPosition = new Vector2(0, -86);
+        titleRt.sizeDelta = new Vector2(760, 110);
 
+        // Subtitle
         GameObject subObj = new GameObject("Subtitle");
-        subObj.transform.SetParent(startOverlay.transform, false);
+        subObj.transform.SetParent(cardObj.transform, false);
         Text sub = subObj.AddComponent<Text>();
-        ArabicUI.Apply(sub, false);
-        sub.text = ArabicStrings.StartSubtitle;
-        sub.fontSize = 56;
-        sub.color = Color.white;
-        sub.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(sub, 34, new Color(0.92f, 0.95f, 1f, 1f), true);
+        sub.text = ArabicStrings.StartTagline;
         RectTransform subRt = sub.rectTransform;
-        subRt.anchorMin = new Vector2(0.5f, 0.5f);
-        subRt.anchorMax = new Vector2(0.5f, 0.5f);
-        subRt.anchoredPosition = new Vector2(0, 70);
-        subRt.sizeDelta = new Vector2(1500, 100);
+        subRt.anchorMin = new Vector2(0.5f, 1f);
+        subRt.anchorMax = new Vector2(0.5f, 1f);
+        subRt.anchoredPosition = new Vector2(0, -162);
+        subRt.sizeDelta = new Vector2(760, 56);
+
+        // Compact Responsive Controls Pill inside card
+        GameObject controlsCardObj = new GameObject("ControlsCard");
+        controlsCardObj.transform.SetParent(cardObj.transform, false);
+        Image controlsCardImg = controlsCardObj.AddComponent<Image>();
+        UIStyle.StyleCard(controlsCardImg, new Color(0.04f, 0.06f, 0.11f, 0.90f), false);
+        RectTransform ccRt = controlsCardObj.GetComponent<RectTransform>();
+        ccRt.anchorMin = new Vector2(0.05f, 1f);
+        ccRt.anchorMax = new Vector2(0.95f, 1f);
+        ccRt.pivot = new Vector2(0.5f, 0.5f);
+        ccRt.anchoredPosition = new Vector2(0, -248);
+        ccRt.sizeDelta = new Vector2(0, 74);
 
         GameObject controlsObj = new GameObject("Controls");
-        controlsObj.transform.SetParent(startOverlay.transform, false);
+        controlsObj.transform.SetParent(controlsCardObj.transform, false);
         Text controls = controlsObj.AddComponent<Text>();
-        ArabicUI.Apply(controls, false);
-        controls.text = ArabicStrings.Controls;
-        controls.fontSize = 34;
-        controls.color = new Color(0.85f, 0.88f, 0.95f, 1f);
-        controls.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(controls, 22, new Color(0.84f, 0.90f, 0.98f, 1f), false, TextAnchor.MiddleCenter, false);
+        controls.text = ArabicStrings.ControlsCard;
+        controls.horizontalOverflow = HorizontalWrapMode.Wrap;
+        controls.resizeTextForBestFit = true;
+        controls.resizeTextMinSize = 15;
+        controls.resizeTextMaxSize = 22;
         RectTransform controlsRt = controls.rectTransform;
-        controlsRt.anchorMin = new Vector2(0.5f, 0.5f);
-        controlsRt.anchorMax = new Vector2(0.5f, 0.5f);
-        controlsRt.anchoredPosition = new Vector2(0, -60);
-        controlsRt.sizeDelta = new Vector2(1600, 120);
+        controlsRt.anchorMin = Vector2.zero;
+        controlsRt.anchorMax = Vector2.one;
+        controlsRt.offsetMin = new Vector2(18, 8);
+        controlsRt.offsetMax = new Vector2(-18, -8);
 
         // Progress hint: the run resumes at the level after the last cleared one.
         int lastCleared = LevelDirector.LastClearedLevel;
         if (lastCleared > 0)
         {
             GameObject resumeObj = new GameObject("ResumeText");
-            resumeObj.transform.SetParent(startOverlay.transform, false);
+            resumeObj.transform.SetParent(cardObj.transform, false);
             Text resume = resumeObj.AddComponent<Text>();
-            ArabicUI.Apply(resume, true);
+            UIStyle.ConfigureArabicText(resume, 22, new Color(1f, 0.80f, 0.22f, 1f), true);
             resume.text = ArabicUI.Format(ArabicStrings.ResumeLevel, lastCleared + 1);
-            resume.fontSize = 30;
-            resume.color = new Color(1f, 0.78f, 0.15f, 1f);
-            resume.alignment = TextAnchor.MiddleCenter;
             resume.raycastTarget = false;
             RectTransform resumeRt = resume.rectTransform;
-            resumeRt.anchorMin = new Vector2(0.5f, 0.5f);
-            resumeRt.anchorMax = new Vector2(0.5f, 0.5f);
-            resumeRt.anchoredPosition = new Vector2(0, -145);
-            resumeRt.sizeDelta = new Vector2(1200, 50);
+            resumeRt.anchorMin = new Vector2(0.5f, 1f);
+            resumeRt.anchorMax = new Vector2(0.5f, 1f);
+            resumeRt.anchoredPosition = new Vector2(0, -310);
+            resumeRt.sizeDelta = new Vector2(720, 40);
         }
 
+        // Primary Play Button (Sleek Rounded Pill)
         GameObject playObj = new GameObject("PlayButton");
-        playObj.transform.SetParent(startOverlay.transform, false);
+        playObj.transform.SetParent(cardObj.transform, false);
         Image playImg = playObj.AddComponent<Image>();
-        playImg.color = new Color(1f, 0.6f, 0f, 1f);
         Button playBtn = playObj.AddComponent<Button>();
+        UIStyle.StyleButton(playBtn, playImg, new Color(0.11f, 0.72f, 0.36f, 1f), true);
         playBtn.onClick.AddListener(() =>
         {
             startOverlay.SetActive(false);
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
             Time.timeScale = 1f;
+            PlayerHealth ph = FindFirstObjectByType<PlayerHealth>();
+            if (ph != null) ph.ResetSpawnProtection();
+            GameAudio.PlayWaveStart();
+            if (GameManager.instance != null) GameManager.instance.OnPlayerStartedGame();
         });
         RectTransform playRt = playObj.GetComponent<RectTransform>();
-        playRt.anchorMin = new Vector2(0.5f, 0.5f);
-        playRt.anchorMax = new Vector2(0.5f, 0.5f);
-        playRt.anchoredPosition = new Vector2(0, -210);
-        playRt.sizeDelta = new Vector2(420, 100);
+        playRt.anchorMin = new Vector2(0.5f, 0f);
+        playRt.anchorMax = new Vector2(0.5f, 0f);
+        playRt.anchoredPosition = new Vector2(0, 212);
+        playRt.sizeDelta = new Vector2(400, 78);
 
         GameObject playTextObj = new GameObject("Text");
         playTextObj.transform.SetParent(playObj.transform, false);
         Text playText = playTextObj.AddComponent<Text>();
-        ArabicUI.Apply(playText, true);
-        playText.text = ArabicStrings.StartSubtitle;
-        playText.fontSize = 46;
-        playText.color = Color.white;
-        playText.alignment = TextAnchor.MiddleCenter;
+        UIStyle.ConfigureArabicText(playText, 36, Color.white, true);
+        playText.text = ArabicStrings.PlayButton;
         RectTransform ptrt = playText.rectTransform;
         ptrt.anchorMin = Vector2.zero;
         ptrt.anchorMax = Vector2.one;
         ptrt.offsetMin = Vector2.zero;
         ptrt.offsetMax = Vector2.zero;
 
-        // Daily gift button — deliberately does NOT hide the overlay or lock the cursor.
+        // Daily Gift Button (Sleek Rounded Pill)
         GameObject dailyObj = new GameObject("DailyGiftButton");
-        dailyObj.transform.SetParent(startOverlay.transform, false);
+        dailyObj.transform.SetParent(cardObj.transform, false);
         Image dailyImg = dailyObj.AddComponent<Image>();
-        dailyImg.color = new Color(0.95f, 0.45f, 0.1f, 1f);
         Button dailyBtn = dailyObj.AddComponent<Button>();
+        UIStyle.StyleButton(dailyBtn, dailyImg, new Color(0.90f, 0.48f, 0.12f, 1f), true);
         RectTransform dailyRt = dailyObj.GetComponent<RectTransform>();
-        dailyRt.anchorMin = new Vector2(0.5f, 0.5f);
-        dailyRt.anchorMax = new Vector2(0.5f, 0.5f);
-        dailyRt.anchoredPosition = new Vector2(0, -330);
-        dailyRt.sizeDelta = new Vector2(420, 84);
+        dailyRt.anchorMin = new Vector2(0.5f, 0f);
+        dailyRt.anchorMax = new Vector2(0.5f, 0f);
+        dailyRt.anchoredPosition = new Vector2(0, 122);
+        dailyRt.sizeDelta = new Vector2(400, 64);
 
         GameObject dailyTextObj = new GameObject("Text");
         dailyTextObj.transform.SetParent(dailyObj.transform, false);
         Text dailyLabel = dailyTextObj.AddComponent<Text>();
-        ArabicUI.Apply(dailyLabel, true);
+        UIStyle.ConfigureArabicText(dailyLabel, 26, Color.white, true);
         dailyLabel.text = ArabicStrings.DailyButton;
-        dailyLabel.fontSize = 32;
-        dailyLabel.color = Color.white;
-        dailyLabel.alignment = TextAnchor.MiddleCenter;
         RectTransform dtrt = dailyLabel.rectTransform;
         dtrt.anchorMin = Vector2.zero;
         dtrt.anchorMax = Vector2.one;
@@ -655,14 +967,58 @@ public class UIManager : MonoBehaviour
 
         dailyGiftButton = dailyBtn;
         dailyGiftLabel = dailyLabel;
+
+        // Reward value preview under Daily Gift button
+        GameObject previewObj = new GameObject("DailyGiftPreview");
+        previewObj.transform.SetParent(cardObj.transform, false);
+        dailyGiftPreviewText = previewObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(dailyGiftPreviewText, 21, new Color(1f, 0.85f, 0.35f, 1f), true);
+        dailyGiftPreviewText.raycastTarget = false;
+        RectTransform pvRt = dailyGiftPreviewText.rectTransform;
+        pvRt.anchorMin = new Vector2(0.5f, 0f);
+        pvRt.anchorMax = new Vector2(0.5f, 0f);
+        pvRt.anchoredPosition = new Vector2(0, 56);
+        pvRt.sizeDelta = new Vector2(760, 42);
+
         RefreshDailyGiftButton();
 
         dailyBtn.onClick.AddListener(() =>
         {
             if (GameFeatures.instance == null) return;
             GameFeatures.instance.ClaimDailyGift();
+            GameAudio.PlayWaveComplete();
             RefreshDailyGiftButton();
         });
+
+        // Fullscreen toggle pill button (top-right of Start Overlay)
+        GameObject fsObj = new GameObject("FullscreenButton");
+        fsObj.transform.SetParent(startOverlay.transform, false);
+        Image fsImg = fsObj.AddComponent<Image>();
+        Button fsBtn = fsObj.AddComponent<Button>();
+        UIStyle.StyleButton(fsBtn, fsImg, new Color(0.14f, 0.20f, 0.30f, 0.95f), true);
+        fsBtn.onClick.AddListener(() => { Screen.fullScreen = !Screen.fullScreen; });
+        RectTransform fsRt = fsObj.GetComponent<RectTransform>();
+        fsRt.anchorMin = new Vector2(1f, 1f);
+        fsRt.anchorMax = new Vector2(1f, 1f);
+        fsRt.pivot = new Vector2(1f, 1f);
+        fsRt.anchoredPosition = new Vector2(-28, -24);
+        fsRt.sizeDelta = new Vector2(196, 48);
+
+        GameObject fsTextObj = new GameObject("Text");
+        fsTextObj.transform.SetParent(fsObj.transform, false);
+        Text fsText = fsTextObj.AddComponent<Text>();
+        UIStyle.ConfigureArabicText(fsText, 20, Color.white, true);
+        fsText.text = ArabicStrings.FullscreenButton;
+        RectTransform ftrt = fsText.rectTransform;
+        ftrt.anchorMin = Vector2.zero;
+        ftrt.anchorMax = Vector2.one;
+        ftrt.offsetMin = Vector2.zero;
+        ftrt.offsetMax = Vector2.zero;
+
+        // Pause world until the player clicks "Play" so they enter action cleanly.
+        Time.timeScale = 0f;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
     }
 
     private void RefreshDailyGiftButton()
@@ -671,6 +1027,11 @@ public class UIManager : MonoBehaviour
         bool claimed = GameFeatures.instance.IsDailyClaimed();
         dailyGiftLabel.text = claimed ? ArabicStrings.DailyClaimedButton : ArabicStrings.DailyButton;
         dailyGiftButton.interactable = !claimed;
+        if (dailyGiftPreviewText != null)
+        {
+            dailyGiftPreviewText.text = claimed ? ArabicStrings.DailyClaimedSummary : ArabicStrings.DailyRewardPreview;
+            dailyGiftPreviewText.color = claimed ? new Color(0.35f, 0.95f, 0.55f, 1f) : new Color(1f, 0.85f, 0.35f, 1f);
+        }
     }
 
     private void SetupHypeUI(Transform parent)

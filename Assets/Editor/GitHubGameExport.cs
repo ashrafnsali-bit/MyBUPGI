@@ -56,9 +56,10 @@ public static class GitHubGameExport
             Directory.CreateDirectory(exportDir);
         }
 
-        // CRITICAL FOR GITHUB PAGES: Enable decompression fallback so files load without server header configuration
+        // CRITICAL FOR GITHUB PAGES: Enable Gzip + decompression fallback to shrink WebGL download size
+        // while staying compatible with GitHub Pages static hosting.
         PlayerSettings.WebGL.decompressionFallback = true;
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled; // Direct loading on GitHub Pages
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
 
         BuildPlayerOptions options = new BuildPlayerOptions
         {

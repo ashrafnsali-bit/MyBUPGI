@@ -349,6 +349,11 @@ public class EnemyAI : MonoBehaviour
     void Update()
     {
         if (isDead) return;
+        if (Time.timeScale <= 0f || UIManager.IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver))
+        {
+            if (agent != null && agent.enabled && agent.isOnNavMesh) agent.isStopped = true;
+            return;
+        }
         if (transform.position.y < -50f) { Die(); return; }
 
         if (player == null)

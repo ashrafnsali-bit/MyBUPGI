@@ -71,9 +71,15 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
+    public void ResetSpawnProtection()
+    {
+        spawnTime = Time.time;
+    }
+
     public void TakeDamage(float amount, Vector3 sourcePosition = default(Vector3))
     {
-        if (isDead) return; 
+        if (isDead) return;
+        if (Time.timeScale <= 0f || UIManager.IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver)) return;
 
         // Visual-only enemy tracer bullets call TakeDamage(0). Ignore them: otherwise they
         // consume the damage cooldown and trigger phantom hit flashes/camera shake, which

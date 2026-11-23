@@ -19,22 +19,52 @@
     <style>
       html, body {
         margin: 0;
-        background: radial-gradient(circle at 50% 25%, #1b2838 0%, #0b1018 65%);
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0b1018 !important;
         color: #fff;
         font-family: "Segoe UI", Tahoma, Arial, sans-serif;
       }
-      #unity-container.unity-desktop { margin: 0 auto; }
+      #unity-container.unity-desktop {
+        position: fixed;
+        inset: 0;
+        left: 0;
+        top: 0;
+        transform: none;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #0b1018;
+      }
+      #unity-canvas {
+        width: 100% !important;
+        height: calc(100vh - 44px) !important;
+        flex: 1 1 auto;
+        display: block;
+        border: none;
+        border-radius: 0;
+        background: #0b1018;
+      }
+      #unity-container.unity-mobile #unity-canvas {
+        height: 100vh !important;
+      }
       #unity-build-title {
         color: #ffc93c;
         font-weight: 700;
+        font-size: 15px;
         letter-spacing: .3px;
+        float: none;
+        line-height: 1;
       }
       #unity-loading-bar {
-        background: rgba(6, 10, 16, .88);
+        background: rgba(6, 10, 16, .92);
         border: 1px solid rgba(255, 201, 60, .35);
         border-radius: 14px;
         padding: 22px 26px;
-        box-shadow: 0 18px 50px rgba(0,0,0,.45);
+        box-shadow: 0 18px 50px rgba(0,0,0,.55);
       }
       #unity-loading-bar #unity-logo { display: none; }
       .load-title {
@@ -54,15 +84,43 @@
         color: #9fb0c3;
         margin-top: 12px;
       }
-      #unity-footer { color: #9fb0c3; }
-      #unity-fullscreen-button { cursor: pointer; }
-      #unity-fullscreen-button::after {
-        content: "ملء الشاشة";
-        position: absolute;
-        white-space: nowrap;
-        font-size: 13px;
-        margin-top: 34px;
+      #unity-footer {
+        height: 44px;
+        flex: 0 0 44px;
+        background: #080c12;
+        border-top: 1px solid rgba(255,255,255,.08);
         color: #9fb0c3;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        box-sizing: border-box;
+      }
+      #unity-logo-title-footer { display: none; }
+      #unity-fullscreen-button {
+        float: none;
+        width: auto;
+        height: 30px;
+        padding: 0 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        background: #1b6e3a;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        border: 1px solid rgba(255,255,255,.2);
+        border-radius: 999px;
+        transition: transform .12s ease, background-color .15s ease;
+      }
+      #unity-fullscreen-button:hover { background: #238c4a; transform: scale(1.03); }
+      #unity-fullscreen-button::after {
+        content: "⛶ ملء الشاشة";
+        position: static;
+        margin: 0;
+        color: #fff;
+        font-size: 13px;
       }
       #unity-warning div {
         font-family: "Segoe UI", Tahoma, Arial, sans-serif;
@@ -117,18 +175,18 @@
       // Cache-busting: bump this whenever the WebGL build is rebuilt so browsers
       // never mix an old loader/framework with a new wasm/data file (that mismatch
       // shows up as "RangeError: Maximum call stack size exceeded at invoke_iii").
-      var buildVersion = "1.4.0";
+      var buildVersion = "1.5.0";
       var v = "?v=" + buildVersion;
       var loaderUrl = buildUrl + "/docs.loader.js" + v;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/docs.data" + v,
-        frameworkUrl: buildUrl + "/docs.framework.js" + v,
-        codeUrl: buildUrl + "/docs.wasm" + v,
+        dataUrl: buildUrl + "/docs.data.unityweb" + v,
+        frameworkUrl: buildUrl + "/docs.framework.js.unityweb" + v,
+        codeUrl: buildUrl + "/docs.wasm.unityweb" + v,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MyBUPGI",
         productName: "MyBUPGI",
-        productVersion: "1.1.0",
+        productVersion: "1.5.0",
         showBanner: unityShowBanner
       };
 
@@ -140,8 +198,8 @@
         // Keep mobile GPU cost lower; the HUD is scaled by CanvasScaler.
         config.devicePixelRatio = 1;
       } else {
-        canvas.style.width = "960px";
-        canvas.style.height = "600px";
+        canvas.style.width = "100%";
+        canvas.style.height = "calc(100vh - 44px)";
       }
 
       document.querySelector("#unity-loading-bar").style.display = "block";

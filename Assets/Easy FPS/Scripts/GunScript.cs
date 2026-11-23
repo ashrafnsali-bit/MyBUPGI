@@ -83,6 +83,7 @@ public class GunScript : MonoBehaviour {
 	Update loop calling for methods that are descriped below where they are initiated.
 	*/
 	void Update(){
+		if (Time.timeScale <= 0f || UIManager.IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver)) return;
 
 		Animations();
 
@@ -102,6 +103,7 @@ public class GunScript : MonoBehaviour {
 
 		if (UIManager.instance != null) {
 			UIManager.instance.UpdateAmmo((int)bulletsInTheGun, (int)bulletsIHave);
+			UIManager.instance.UpdateReloadPrompt((int)bulletsInTheGun, (int)bulletsIHave, reloading);
 		}
 	}
 
@@ -119,7 +121,10 @@ public class GunScript : MonoBehaviour {
 		 * Changing some values if we are aiming, like sensitity, zoom racion and position of the waepon.
 		 */
 		//if aiming
-		if(Input.GetAxis("Fire2") != 0 && !reloading && !meeleAttack){
+		bool isAimingNow = Input.GetAxis("Fire2") != 0 && !reloading && !meeleAttack;
+		if (UIManager.instance != null) UIManager.instance.SetAiming(isAimingNow);
+
+		if(isAimingNow){
 			gunPrecision = gunPrecision_aiming;
 			recoilAmount_x = recoilAmount_x_;
 			recoilAmount_y = recoilAmount_y_;
@@ -468,6 +473,7 @@ public class GunScript : MonoBehaviour {
 		if(waitTillNextFire <= 0 && !reloading && pmS.maxSpeed < 5){
 
 			if(bulletsInTheGun > 0){
+				if (GameManager.instance != null) GameManager.instance.RegisterShotFired();
 
 				int randomNumberForMuzzelFlash = Random.Range(0,5);
 				if (bullet) {
@@ -483,25 +489,30 @@ public class GunScript : MonoBehaviour {
 					if (playerLayer != -1) hitscanMask &= ~(1 << playerLayer);
 					if (ignoreRaycastLayer != -1) hitscanMask &= ~(1 << ignoreRaycastLayer);
 
+					bool hitEnemy = false;
+					bool killedEnemy = false;
 					if (Physics.Raycast(ray, out hit, 2000f, hitscanMask, QueryTriggerInteraction.Ignore)) {
 						targetPoint = hit.point;
 						
 						// DEAL DAMAGE INSTANTLY (gift buff can double it)
 						float effectiveDamage = damage * (GameFeatures.instance != null ? GameFeatures.instance.DamageMultiplier : 1f);
-						bool hitEnemy = false;
 						EnemyAI enemy = hit.transform.GetComponentInParent<EnemyAI>();
 						if (enemy != null) {
+							bool wasAlive = enemy.health > 0f;
 							enemy.TakeDamage(effectiveDamage);
 							hitEnemy = true;
+							killedEnemy = wasAlive && enemy.health <= 0f;
 						} else if (hit.transform.tag == "Enemy" || hit.transform.tag == "Dummie" || hit.transform.tag == "ExplosiveBarrel") {
 							hit.transform.SendMessage("TakeDamage", effectiveDamage, SendMessageOptions.DontRequireReceiver);
 							hitEnemy = true;
 						}
 
 						if (hitEnemy) {
-							// UI Feedback
-							if (UIManager.instance != null) UIManager.instance.ShowHitMarker();
+							if (GameManager.instance != null) GameManager.instance.RegisterShotHit();
+							// UI & Audio Feedback
+							if (UIManager.instance != null) UIManager.instance.ShowHitMarker(killedEnemy);
 							GunScript.HitMarkerSound();
+							GameAudio.PlayHit(killedEnemy);
 							FloatingDamage.Create(hit.point, (int)effectiveDamage);
 							
 							// Try to get Blood Effect from bullet prefab
@@ -512,6 +523,10 @@ public class GunScript : MonoBehaviour {
 						}
 					} else {
 						targetPoint = ray.GetPoint(2000f); // Fallback far away
+					}
+
+					if (!hitEnemy && GameManager.instance != null) {
+						GameManager.instance.RegisterShotMiss();
 					}
 					
 					// VISUAL BULLET (Spawns and flies for visual effect and wall decals only)
@@ -584,11 +599,10 @@ public class GunScript : MonoBehaviour {
 	IEnumerator Reload_Animation(){
 		if(bulletsIHave > 0 && bulletsInTheGun < amountOfBulletsPerLoad && !reloading/* && !aiming*/){
 
-			if (reloadSound_source.isPlaying == false && reloadSound_source != null) {
-				if (reloadSound_source)
-					reloadSound_source.Play ();
-				else
-					print ("'Reload Sound Source' missing.");
+			if (reloadSound_source != null) {
+				if (!reloadSound_source.isPlaying) reloadSound_source.Play ();
+			} else {
+				GameAudio.PlayReloadClick();
 			}
 		
 

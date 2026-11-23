@@ -179,13 +179,37 @@ public class GameFeatures : MonoBehaviour
         Collider rc = ribbon.GetComponent<Collider>();
         if (rc != null) Destroy(rc);
 
+        // Tall vertical golden beacon beam so players can spot the mystery gift across the arena.
+        GameObject beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        beam.name = "GiftLightBeam";
+        beam.transform.SetParent(box.transform, false);
+        beam.transform.localPosition = new Vector3(0f, 12f, 0f);
+        beam.transform.localScale = new Vector3(0.28f, 12f, 0.28f);
+        Collider bc = beam.GetComponent<Collider>();
+        if (bc != null) Destroy(bc);
+        Renderer br = beam.GetComponent<Renderer>();
+        if (br != null)
+        {
+            Shader beamShader = Shader.Find("Sprites/Default");
+            if (beamShader == null) beamShader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (beamShader != null)
+            {
+                Material bmat = new Material(beamShader);
+                Color beamCol = new Color(1f, 0.82f, 0.18f, 0.42f);
+                bmat.color = beamCol;
+                if (bmat.HasProperty("_BaseColor")) bmat.SetColor("_BaseColor", beamCol);
+                br.material = bmat;
+            }
+        }
+
         Collider boxCollider = box.GetComponent<Collider>();
         if (boxCollider != null) boxCollider.isTrigger = true;
         SphereCollider trigger = box.AddComponent<SphereCollider>();
         trigger.isTrigger = true;
         trigger.radius = 1.8f;
 
-        box.AddComponent<GiftBoxPickup>();
+        GiftBoxPickup pickup = box.AddComponent<GiftBoxPickup>();
+        pickup.expireTime = Time.unscaledTime + giftLifetime;
         Destroy(box, giftLifetime);
 
         Announce(ArabicStrings.GiftAppeared, 2.4f);
@@ -342,25 +366,36 @@ public class GameFeatures : MonoBehaviour
 /// <summary>World gift box: opens when the player walks into it.</summary>
 public class GiftBoxPickup : MonoBehaviour
 {
+    public float expireTime;
     private bool opened;
     private Vector3 basePos;
 
     void Start()
     {
         basePos = transform.position;
+        if (expireTime <= 0f) expireTime = Time.unscaledTime + 25f;
     }
 
     void Update()
     {
         transform.Rotate(Vector3.up * 90f * Time.deltaTime, Space.World);
         transform.position = new Vector3(basePos.x, basePos.y + Mathf.Sin(Time.time * 2.5f) * 0.22f, basePos.z);
+        float remaining = Mathf.Max(0f, expireTime - Time.unscaledTime);
+        if (UIManager.instance != null) UIManager.instance.UpdateGiftBeacon(transform.position, remaining);
     }
 
     void OnTriggerEnter(Collider other)
     {
         if (opened || !other.CompareTag("Player")) return;
         opened = true;
+        if (UIManager.instance != null) UIManager.instance.ClearGiftBeacon();
         if (GameFeatures.instance != null) GameFeatures.instance.OpenGift();
+        GameAudio.PlayWaveComplete();
         Destroy(gameObject);
+    }
+
+    void OnDestroy()
+    {
+        if (UIManager.instance != null) UIManager.instance.ClearGiftBeacon();
     }
 }

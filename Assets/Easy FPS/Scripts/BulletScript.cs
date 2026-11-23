@@ -37,6 +37,7 @@ public class BulletScript : MonoBehaviour {
 
 	void Update () {
 		if (hasDealtDamage) return;
+		if (Time.timeScale <= 0f || UIManager.IsStartOverlayActive || (GameManager.instance != null && GameManager.instance.isGameOver)) return;
 		
 		// Use a precise radius for environment and a thicker one for targets
 		float precisionRadius = 0.1f; 

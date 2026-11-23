@@ -105,6 +105,7 @@ public class Grenade : MonoBehaviour
 
         // Keep track of hit objects to avoid doing multiple times damage to same entity (if it has multiple colliders)
         System.Collections.Generic.HashSet<GameObject> hitObjects = new System.Collections.Generic.HashSet<GameObject>();
+        int enemiesHit = 0;
 
         Collider[] colliders = Physics.OverlapSphere(transform.position, explosionRadius);
         foreach (Collider col in colliders)
@@ -121,6 +122,7 @@ public class Grenade : MonoBehaviour
                 enemy.TakeDamage(explosionDamage); 
                 FloatingDamage.Create(enemy.transform.position, (int)explosionDamage); 
                 hitSomething = true;
+                enemiesHit++;
             }
             // Fallback for dummies or other enemies without EnemyAI script
             else if (hurtsEnemies && (col.transform.tag == "Enemy" || col.transform.tag == "Dummie"))
@@ -128,6 +130,7 @@ public class Grenade : MonoBehaviour
                 col.transform.SendMessage("TakeDamage", explosionDamage, SendMessageOptions.DontRequireReceiver);
                 FloatingDamage.Create(col.transform.position, (int)explosionDamage);
                 hitSomething = true;
+                enemiesHit++;
             }
             
             // Check for player
@@ -152,6 +155,25 @@ public class Grenade : MonoBehaviour
 
             if (hitSomething || rb != null) {
                 hitObjects.Add(root.gameObject);
+            }
+        }
+
+        if (hurtsEnemies && enemiesHit > 0)
+        {
+            if (UIManager.instance != null) UIManager.instance.ShowHitMarker(enemiesHit >= 2);
+            GameAudio.PlayHit(enemiesHit >= 2);
+
+            if (enemiesHit >= 2)
+            {
+                int bonus = 150 * enemiesHit;
+                if (GameManager.instance != null)
+                {
+                    GameManager.instance.score += bonus;
+                    GameManager.instance.ShowAnnouncement(
+                        ArabicUI.Format(ArabicStrings.GrenadeMultiHit, enemiesHit, bonus), 2.5f);
+                }
+                if (UIManager.instance != null)
+                    UIManager.instance.FlashWaveBanner(new Color(1f, 0.45f, 0.1f, 0.2f));
             }
         }
 

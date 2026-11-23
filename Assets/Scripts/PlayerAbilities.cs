@@ -79,6 +79,15 @@ public class PlayerAbilities : MonoBehaviour
             sonarMessageTimer -= Time.deltaTime;
             if (sonarMessageTimer <= 0) sonarMessage = "";
         }
+
+        // 5. Update unified Arabic Abilities & Shield HUD
+        if (UIManager.instance != null)
+        {
+            float dashCd = Mathf.Max(0f, (lastDashTime + dashCooldown) - Time.time);
+            float btCd = Mathf.Max(0f, (lastBulletTime + bulletTimeCooldown) - Time.unscaledTime);
+            float sonarCd = Mathf.Max(0f, (lastSonarTime + sonarCooldown) - Time.time);
+            UIManager.instance.UpdateAbilitiesHUD(currentShield, maxShield, dashCd, btCd, isBulletTimeActive, sonarCd);
+        }
     }
 
     void HandleAbilitiesInput()
@@ -147,6 +156,8 @@ public class PlayerAbilities : MonoBehaviour
             rb.linearVelocity = new Vector3(dashDir.x * dashForce, 2f, dashDir.z * dashForce);
         }
 
+        GameAudio.PlayDash();
+        if (UIManager.instance != null) UIManager.instance.FlashWaveBanner(new Color(0.6f, 0.92f, 1f, 0.14f));
         if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.15f, 0.15f);
 
         // FOV Warp effect
@@ -180,6 +191,8 @@ public class PlayerAbilities : MonoBehaviour
         Time.timeScale = bulletTimeScale;
         Time.fixedDeltaTime = 0.02f * Time.timeScale;
 
+        GameAudio.PlaySlowMo();
+        if (UIManager.instance != null) UIManager.instance.FlashWaveBanner(new Color(0.15f, 0.55f, 1f, 0.18f));
         if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.2f, 0.1f);
 
         yield return new WaitForSecondsRealtime(bulletTimeDuration);
@@ -225,96 +238,65 @@ public class PlayerAbilities : MonoBehaviour
     {
         lastSonarTime = Time.time;
         EnemyAI[] enemies = FindObjectsByType<EnemyAI>(FindObjectsSortMode.None);
-        int count = 0;
+        System.Collections.Generic.List<EnemyAI> detected = new System.Collections.Generic.List<EnemyAI>();
         foreach (var e in enemies)
         {
             if (e != null && e.gameObject.activeInHierarchy && Vector3.Distance(transform.position, e.transform.position) <= sonarRadius)
             {
-                count++;
+                detected.Add(e);
             }
         }
 
+        int count = detected.Count;
         sonarMessage = $"SONAR SCAN: {count} HOSTILES DETECTED WITHIN {sonarRadius}m!";
         sonarMessageTimer = 3.5f;
 
+        GameAudio.PlaySonarPing();
+        if (UIManager.instance != null)
+        {
+            UIManager.instance.FlashWaveBanner(new Color(0.05f, 0.85f, 1f, 0.16f));
+            string arabicMsg = count > 0
+                ? ArabicUI.Format(ArabicStrings.SonarDetected, count)
+                : ArabicStrings.SonarNone;
+            UIManager.instance.ShowBuff(arabicMsg, 3.2f);
+        }
+
+        if (count > 0) StartCoroutine(HighlightSonarEnemies(detected, 4.0f));
         if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.2f, 0.1f);
+    }
+
+    IEnumerator HighlightSonarEnemies(System.Collections.Generic.List<EnemyAI> targets, float duration)
+    {
+        var saved = new System.Collections.Generic.List<System.Tuple<Renderer, Color>>();
+        Color pulseColor = new Color(0.1f, 0.95f, 1f, 1f);
+        foreach (var enemy in targets)
+        {
+            if (enemy == null) continue;
+            foreach (var r in enemy.GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || r.material == null) continue;
+                saved.Add(new System.Tuple<Renderer, Color>(r, r.material.color));
+                r.material.color = Color.Lerp(r.material.color, pulseColor, 0.65f);
+            }
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        foreach (var pair in saved)
+        {
+            if (pair.Item1 != null && pair.Item1.material != null)
+            {
+                pair.Item1.material.color = pair.Item2;
+            }
+        }
     }
 
     void OnGUI()
     {
         if (playerHealth == null || Time.timeScale == 0) return;
 
-        // Modern Bottom-Left Abilities & Shield HUD (Positioned above Health Bar)
-        float boxWidth = 260;
-        float boxHeight = 135;
-        float startX = 30;
-        float startY = Screen.height - boxHeight - 145;
-
-        // Background Panel
-        GUI.color = new Color(0.05f, 0.05f, 0.08f, 0.85f);
-        GUI.DrawTexture(new Rect(startX, startY, boxWidth, boxHeight), Texture2D.whiteTexture);
-
-        // Border
-        GUI.color = new Color(0.2f, 0.6f, 1.0f, 0.8f);
-        GUI.DrawTexture(new Rect(startX, startY, boxWidth, 2), Texture2D.whiteTexture);
-
-        // SHIELD BAR
-        GUI.color = Color.white;
-        GUI.Label(new Rect(startX + 10, startY + 8, 200, 20), $"<b>ENERGY SHIELD: {(int)currentShield}/{(int)maxShield}</b>");
-
-        // Shield bar background
-        GUI.color = new Color(0.1f, 0.1f, 0.2f, 1f);
-        GUI.DrawTexture(new Rect(startX + 10, startY + 28, boxWidth - 20, 14), Texture2D.whiteTexture);
-
-        // Shield bar fill (Neon Cyan)
-        GUI.color = new Color(0f, 0.8f, 1f, 1f);
-        float shieldPct = Mathf.Clamp01(currentShield / maxShield);
-        GUI.DrawTexture(new Rect(startX + 12, startY + 30, (boxWidth - 24) * shieldPct, 10), Texture2D.whiteTexture);
-
-        // ABILITIES STATUS
-        float dashCooldownRemaining = Mathf.Max(0, (lastDashTime + dashCooldown) - Time.time);
-        float btCooldownRemaining = Mathf.Max(0, (lastBulletTime + bulletTimeCooldown) - Time.unscaledTime);
-        float sonarCooldownRemaining = Mathf.Max(0, (lastSonarTime + sonarCooldown) - Time.time);
-
-        // Dash Status
-        string dashStatus = dashCooldownRemaining <= 0 ? "<color=#00FF66>READY [SHIFT/Q]</color>" : $"<color=#FFAA00>{dashCooldownRemaining:F1}s</color>";
-        GUI.color = Color.white;
-        GUI.Label(new Rect(startX + 10, startY + 48, 240, 20), $"<b>[DASH]:</b> {dashStatus}");
-
-        // Bullet Time Status
-        string btStatus = isBulletTimeActive ? "<color=#00E5FF>ACTIVE!</color>" : (btCooldownRemaining <= 0 ? "<color=#00FF66>READY [F]</color>" : $"<color=#FFAA00>{btCooldownRemaining:F1}s</color>");
-        GUI.Label(new Rect(startX + 10, startY + 68, 240, 20), $"<b>[SLOW-MO]:</b> {btStatus}");
-
-        // Sonar Status
-        string sonarStatus = sonarCooldownRemaining <= 0 ? "<color=#00FF66>READY [X]</color>" : $"<color=#FFAA00>{sonarCooldownRemaining:F1}s</color>";
-        GUI.Label(new Rect(startX + 10, startY + 88, 240, 20), $"<b>[SONAR]:</b> {sonarStatus}");
-
-        // Double jump hint
-        GUI.color = new Color(0.8f, 0.8f, 0.8f, 0.8f);
-        GUI.Label(new Rect(startX + 10, startY + 110, 240, 20), "<size=11>SPACE in air: Double Jump</size>");
-
-        // ACTIVE NOTIFICATION / SONAR BANNER
-        if (!string.IsNullOrEmpty(sonarMessage))
-        {
-            float msgW = 450;
-            float msgH = 40;
-            float msgX = (Screen.width - msgW) / 2;
-            float msgY = 120;
-
-            GUI.color = new Color(0, 0, 0, 0.8f);
-            GUI.DrawTexture(new Rect(msgX, msgY, msgW, msgH), Texture2D.whiteTexture);
-
-            GUI.color = new Color(0f, 1f, 0.8f, 1f);
-            GUI.DrawTexture(new Rect(msgX, msgY, msgW, 2), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(msgX, msgY + msgH - 2, msgW, 2), Texture2D.whiteTexture);
-
-            GUI.color = Color.cyan;
-            GUI.skin.label.alignment = TextAnchor.MiddleCenter;
-            GUI.Label(new Rect(msgX, msgY, msgW, msgH), $"<b>{sonarMessage}</b>");
-            GUI.skin.label.alignment = TextAnchor.UpperLeft;
-        }
-
-        // Bullet Time visual overlay
+        // Abilities & Shield HUD is now rendered in unified Arabic via UIManager.UpdateAbilitiesHUD.
+        // Keep only the subtle blue Slow-Mo tint while Bullet Time is active.
         if (isBulletTimeActive)
         {
             GUI.color = new Color(0f, 0.5f, 1f, 0.08f);
