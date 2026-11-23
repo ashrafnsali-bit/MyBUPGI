@@ -86,11 +86,25 @@ public class GameFeatures : MonoBehaviour
                 UIManager.instance.ShowBuff(active, 1.2f);
         }
 
-        if (GameManager.instance == null || GameManager.instance.isGameOver) return;
+        if (GameManager.instance == null || GameManager.instance.isGameOver ||
+            UIManager.IsStartOverlayActive || Time.timeScale <= 0f)
+        {
+            // Keep timers pushed forward while paused on Start Screen so nothing spawns before Play is clicked
+            if (UIManager.IsStartOverlayActive)
+            {
+                nextGiftTime = now + firstGiftDelay;
+                nextEventTime = now + firstEventDelay;
+            }
+            return;
+        }
 
         if (now >= nextGiftTime)
         {
-            SpawnGiftBox();
+            // Allow at most 1 active gift box in the arena at a time
+            if (Object.FindFirstObjectByType<GiftBoxPickup>() == null)
+            {
+                SpawnGiftBox();
+            }
             nextGiftTime = now + Random.Range(giftIntervalMin, giftIntervalMax);
         }
 
@@ -169,13 +183,26 @@ public class GameFeatures : MonoBehaviour
             else rend.material.color = Color.yellow;
         }
 
-        // A simple red ribbon makes it read as a present rather than a crate.
+        // A simple red ribbon makes it read as a present rather than a crate (URP-safe shader).
         GameObject ribbon = GameObject.CreatePrimitive(PrimitiveType.Cube);
         ribbon.name = "Ribbon";
         ribbon.transform.SetParent(box.transform, false);
         ribbon.transform.localScale = new Vector3(1.04f, 0.14f, 1.04f);
         Renderer rr = ribbon.GetComponent<Renderer>();
-        if (rr != null) rr.material.color = new Color(0.95f, 0.16f, 0.35f);
+        if (rr != null)
+        {
+            Shader rShader = Shader.Find("Universal Render Pipeline/Lit");
+            if (rShader == null) rShader = Shader.Find("Standard");
+            Color crimson = new Color(0.88f, 0.12f, 0.22f, 1f);
+            if (rShader != null)
+            {
+                Material rmat = new Material(rShader);
+                rmat.color = crimson;
+                if (rmat.HasProperty("_BaseColor")) rmat.SetColor("_BaseColor", crimson);
+                rr.material = rmat;
+            }
+            else rr.material.color = crimson;
+        }
         Collider rc = ribbon.GetComponent<Collider>();
         if (rc != null) Destroy(rc);
 
@@ -262,6 +289,8 @@ public class GameFeatures : MonoBehaviour
     {
         GameManager gm = GameManager.instance;
         int roll = Random.Range(0, 4);
+        // Avoid flooding the map when many enemies are already active
+        if (gm != null && gm.totalEnemies >= 14 && (roll == 0 || roll == 1)) roll = 3;
         switch (roll)
         {
             case 0:
