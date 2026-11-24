@@ -143,6 +143,7 @@
         }
         const packet = {
           type: "state",
+          room: roomCode,
           id: myPeerId,
           name: myName,
           x: s.x, y: s.y, z: s.z, ry: s.ry,
@@ -180,7 +181,7 @@
     stopMic(true);
     voiceCalls.forEach(c => { try { c.close(); } catch (e) {} });
     voiceCalls.clear();
-    remoteAudios.forEach(a => { try { a.remove(); } catch (e) {} });
+    remoteAudios.forEach(a => { try { a.pause(); a.srcObject = null; a.remove(); } catch (e) {} });
     remoteAudios.clear();
 
     connections.forEach(c => { try { c.close(); } catch (e) {} });
@@ -255,7 +256,7 @@
 
       conn.on("open", () => {
         roster.set(id, { id, name: myName, score: lastLocalState.score, kills: lastLocalState.kills, hp: 100, isHost: false, colorIndex: 1 });
-        conn.send({ type: "hello", id: myPeerId, name: myName });
+        conn.send({ type: "hello", room: clean, id: myPeerId, name: myName });
         setStatus("تم الانضمام للمجموعة " + clean + " بنجاح!", false);
         appendSystemChat("انضممت إلى المجموعة " + clean);
         updateRoomUI();
@@ -292,6 +293,11 @@
 
     conn.on("data", (msg) => {
       if (!msg || typeof msg !== "object") return;
+      // Strict room isolation: reject any packet whose room code does not match this host's room
+      if (!roomCode || msg.room !== roomCode) {
+        try { conn.close(); } catch (e) {}
+        return;
+      }
       if (msg.type === "hello") {
         const pName = (msg.name || "لاعب").trim().slice(0, 20);
         const colorIndex = roster.size;
@@ -300,9 +306,12 @@
         broadcastRoster();
         const joinText = "انضم " + pName + " إلى المجموعة!";
         appendSystemChat(joinText);
-        broadcastToClients({ type: "sys", text: joinText }, null);
+        broadcastToClients({ type: "sys", room: roomCode, text: joinText }, null);
         renderRoster();
         if (micEnabled && localStream) callPeerVoice(conn.peer);
+      } else if (!roster.has(conn.peer)) {
+        // Ignore any chat/state from unauthenticated peers not in this group's roster
+        return;
       } else if (msg.type === "state") {
         const entry = roster.get(conn.peer);
         if (entry) {
@@ -315,7 +324,7 @@
         sendToUnity("OnPeerState", msg);
         broadcastToClients(msg, conn.peer);
       } else if (msg.type === "chat") {
-        const chatMsg = { type: "chat", id: conn.peer, name: msg.name || "لاعب", text: (msg.text || "").slice(0, 240) };
+        const chatMsg = { type: "chat", room: roomCode, id: conn.peer, name: msg.name || "لاعب", text: (msg.text || "").slice(0, 240) };
         appendChat(chatMsg.name, chatMsg.text, false);
         broadcastToClients(chatMsg, conn.peer);
       } else if (msg.type === "rename") {
@@ -339,18 +348,27 @@
       if (left) {
         const txt = "غادر " + left.name + " المجموعة.";
         appendSystemChat(txt);
-        broadcastToClients({ type: "sys", text: txt }, null);
+        broadcastToClients({ type: "sys", room: roomCode, text: txt }, null);
       }
     });
   }
 
   function handleClientData(msg) {
     if (!msg || typeof msg !== "object") return;
+    if (msg.type === "full") {
+      setStatus("المجموعة ممتلئة حالياً (الحد الأقصى 8 لاعبين).", true);
+      leaveRoom(true);
+      return;
+    }
+    // Strict room isolation on client side as well
+    if (!roomCode || msg.room !== roomCode) return;
+
     if (msg.type === "roster" && Array.isArray(msg.players)) {
       const incomingIds = new Set(msg.players.map(p => p.id));
       roster.forEach((_, id) => {
         if (!incomingIds.has(id) && id !== myPeerId) {
           roster.delete(id);
+          closeVoiceForPeer(id);
           sendToUnity("OnPeerLeft", id);
         }
       });
@@ -364,7 +382,7 @@
       });
       renderRoster();
     } else if (msg.type === "state") {
-      if (msg.id === myPeerId) return;
+      if (msg.id === myPeerId || !roster.has(msg.id)) return;
       const entry = roster.get(msg.id);
       if (entry) {
         entry.score = msg.score || 0;
@@ -377,9 +395,6 @@
       appendChat(msg.name || "لاعب", msg.text || "", msg.id === myPeerId);
     } else if (msg.type === "sys") {
       appendSystemChat(msg.text || "");
-    } else if (msg.type === "full") {
-      setStatus("المجموعة ممتلئة حالياً (الحد الأقصى 8 لاعبين).", true);
-      leaveRoom(true);
     }
   }
 
@@ -394,7 +409,7 @@
   function broadcastRoster() {
     if (!isHost) return;
     const players = Array.from(roster.values());
-    broadcastToClients({ type: "roster", players }, null);
+    broadcastToClients({ type: "roster", room: roomCode, players }, null);
   }
 
   function broadcastMeta() {
@@ -403,7 +418,7 @@
       broadcastRoster();
     } else {
       const hostConn = connections.get(ROOM_PREFIX + roomCode);
-      if (hostConn && hostConn.open) hostConn.send({ type: "rename", name: myName });
+      if (hostConn && hostConn.open) hostConn.send({ type: "rename", room: roomCode, name: myName });
     }
   }
 
@@ -416,7 +431,7 @@
       return;
     }
     appendChat(myName, text, true);
-    const packet = { type: "chat", id: myPeerId, name: myName, text };
+    const packet = { type: "chat", room: roomCode, id: myPeerId, name: myName, text };
     if (isHost) {
       broadcastToClients(packet, null);
     } else {
@@ -464,9 +479,10 @@
   }
 
   function callPeerVoice(targetPeerId) {
-    if (!peer || !localStream || !targetPeerId || targetPeerId === myPeerId) return;
+    if (!peer || !localStream || !roomCode || !targetPeerId || targetPeerId === myPeerId) return;
+    if (!roster.has(targetPeerId)) return; // Only ever call verified members of THIS group
     try {
-      const call = peer.call(targetPeerId, localStream);
+      const call = peer.call(targetPeerId, localStream, { metadata: { room: roomCode } });
       if (!call) return;
       voiceCalls.set(targetPeerId, call);
       call.on("stream", (remoteStream) => attachRemoteAudio(targetPeerId, remoteStream));
@@ -476,6 +492,13 @@
 
   function handleIncomingVoiceCall(call) {
     try {
+      // Strict voice isolation: reject any audio call that does not belong to THIS active group & roster
+      const callerRoom = call && call.metadata ? call.metadata.room : null;
+      const isAuthorizedMember = !!roomCode && callerRoom === roomCode && (roster.has(call.peer) || call.peer === ROOM_PREFIX + roomCode);
+      if (!isAuthorizedMember) {
+        try { call.close(); } catch (e) {}
+        return;
+      }
       call.answer(localStream || undefined);
       voiceCalls.set(call.peer, call);
       call.on("stream", (remoteStream) => attachRemoteAudio(call.peer, remoteStream));
@@ -484,6 +507,7 @@
   }
 
   function attachRemoteAudio(peerId, stream) {
+    if (!roomCode || (!roster.has(peerId) && peerId !== ROOM_PREFIX + roomCode)) return;
     let audio = remoteAudios.get(peerId);
     if (!audio) {
       audio = document.createElement("audio");
@@ -501,7 +525,7 @@
     const c = voiceCalls.get(peerId);
     if (c) { try { c.close(); } catch (e) {} voiceCalls.delete(peerId); }
     const a = remoteAudios.get(peerId);
-    if (a) { try { a.remove(); } catch (e) {} remoteAudios.delete(peerId); }
+    if (a) { try { a.pause(); a.srcObject = null; a.remove(); } catch (e) {} remoteAudios.delete(peerId); }
   }
 
   // ---- UI Wiring ----
