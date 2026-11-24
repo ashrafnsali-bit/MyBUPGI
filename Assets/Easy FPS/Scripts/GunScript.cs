@@ -561,10 +561,12 @@ public class GunScript : MonoBehaviour {
 				holdFlash = Instantiate(muzzelFlash[randomNumberForMuzzelFlash], muzzelSpawn.transform.position /*- muzzelPosition*/, muzzelSpawn.transform.rotation * Quaternion.Euler(0,0,90) ) as GameObject;
 				holdFlash.transform.parent = muzzelSpawn.transform;
                 Destroy(holdFlash, 0.05f); // CRITICAL: Destroy player's muzzle flash instantly to prevent URP light crash!
-				if (shoot_sound_source)
-					shoot_sound_source.Play ();
-				else
-					print ("Missing 'Shoot Sound Source'.");
+				if (shoot_sound_source && shoot_sound_source.clip != null)
+				{
+					shoot_sound_source.pitch = Random.Range(0.93f, 1.07f);
+					shoot_sound_source.PlayOneShot(shoot_sound_source.clip, 0.55f);
+				}
+				GameAudio.PlayGunshot(currentStyle == GunStyles.nonautomatic);
 
 				RecoilMath();
 				if (CameraShake.instance != null) CameraShake.instance.TriggerShake(0.06f, 0.02f);

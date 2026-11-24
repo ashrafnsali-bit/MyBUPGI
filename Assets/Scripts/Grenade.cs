@@ -68,6 +68,7 @@ public class Grenade : MonoBehaviour
         hasExploded = true;
 
         if (explosionEffect != null) Instantiate(explosionEffect, transform.position, transform.rotation);
+        GameAudio.PlayExplosion(0.95f);
         
         if (explosionSound != null) {
             // Create a devastating explosion sound effect by layering multiple 2D sounds

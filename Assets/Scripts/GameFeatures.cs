@@ -278,6 +278,10 @@ public class GameFeatures : MonoBehaviour
                 break;
         }
 
+        // Every Mystery Gift always grants guaranteed Player Health + Grenade + Score,
+        // in addition to the random tactical power-up above!
+        if (health != null) health.Heal(25f);
+        if (grenades != null) grenades.AddGrenades(1);
         if (GameManager.instance != null) GameManager.instance.score += 150;
         Announce(ArabicStrings.GiftOpened + "\n" + label, 2.5f);
         if (UIManager.instance != null) UIManager.instance.ShowBuff(label, 3f);
